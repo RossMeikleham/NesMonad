@@ -2,9 +2,11 @@
 
 import Data.Word
 import Control.Monad.State.Lazy
+import qualified Data.Vector.Unboxed as VU
 
 data CPU = CPU {
-    registers :: Registers
+    registers :: Registers,
+    memory :: Memory
 }
 
 data Registers = Registers {
@@ -26,18 +28,16 @@ data StatusFlags =
     | Overflow
     | Negative
 
+data Memory = Memory (VU.Vector Word8)
 
 type CPUState a = State CPU a
 
+-- Get/Set all Registers from CPU
 getRegs :: CPUState Registers
-getRegs = do
-    cpu <- get
-    return (registers cpu)
+getRegs = get >>= return . registers
 
 setRegs :: Registers -> CPUState ()
-setRegs regs = do
-    cpu <- get
-    put (cpu {registers = regs})
+setRegs regs = get >>= \cpu -> put $ cpu {registers = regs}
 
 -- Set specific Registers
 setA :: Word8 -> CPUState ()
@@ -66,6 +66,26 @@ getY = getRegs >>= return . regY
 getS :: CPUState Word8
 getS = getRegs >>= return . status
 
+-- Memory
+
+getAllMem :: CPUState Memory
+getAllMem = get >>= return . memory
+
+setAllMem :: Memory -> CPUState ()
+setAllMem mem = get >>= \cpu -> put $ cpu {memory = mem}
+
+-- Get/Set word from Memory
+getMem :: Word16 -> CPUState Word8
+getMem loc = do 
+    (Memory mem) <- getAllMem
+    return $ mem VU.! (fromIntegral loc)
+
+setMem :: Word8 -> Word16 -> CPUState ()
+setMem val loc = do 
+    (Memory mem) <- getAllMem 
+    setAllMem $ Memory $ VU.update mem updatedIndex
+ where updatedIndex = VU.fromList [(fromIntegral loc, val)]
+
 
 tay = 0xA8
 tax = 0xAA
@@ -73,16 +93,21 @@ tsx = 0xBA
 tya = 0x98
 txa = 0x8A
 txs = 0x9A
+ldann = 0xA9
+ldxnn = 0xA2
+ldynn = 0xA0
 
-
-executeOpCode :: Word8 -> CPUState ()
-executeOpCode op  
+executeOpCode :: Word8 -> Word8 -> CPUState ()
+executeOpCode op dat
+    -- Register/Immediate to Register Transfer 
     | op == tay = setY =<< getA
     | op == tax = setX =<< getA
     | op == tsx = setX =<< getS
     | op == tya = setA =<< getY
     | op == txa = setA =<< getX
     | op == txs = setS =<< getX
-
+    | op == ldann = setA dat
+    | op == ldxnn = setX dat
+    | op == ldynn = setY dat
 
 
