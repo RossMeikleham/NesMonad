@@ -35,7 +35,7 @@ data Memory = Memory (VU.Vector Word8)
 type CPUState a = State CPU a
 
 data AddressingMode = 
-    Implied Reg | Immediate | ZeroPageNoReg | ZeroPage Reg | AbsoluteNoReg |
+    ZeroPageNoReg | ZeroPage Reg | AbsoluteNoReg |
     Absolute Reg | IndirectX | IndirectY
 
 data Reg = A | B | X | Y | S 
@@ -53,51 +53,71 @@ setReg X = setX
 setReg Y = setY
 setReg S = setS
 
--- Load Instruction
-loadIns :: Reg -> AddressingMode -> CPUState ()
-loadIns r1 (Implied r2) = setReg r1 =<< getReg r2 -- r1 = r2
 
-loadIns r  Immediate = do -- r = nn
+-- | Move Reg to Reg
+moveRegIns :: Reg -> Reg -> CPUState () 
+moveRegIns r1 r2 = setReg r1 =<< getReg r2 -- r1 = r2
+
+loadRegIm :: Reg -> CPUState()
+loadRegIm r = do -- r = nn
     pc <- getPC
     imm <- getMem $ pc + 1
     setReg r imm
 
-loadIns r  ZeroPageNoReg = do -- r = [nn]
-    pc <- getPC
-    val <- getMem . fromIntegral =<< getMem (pc + 1)
-    setReg r val
+-- |Load Instruction (Moe Mem to Reg)
+loadIns :: Reg -> AddressingMode -> CPUState()
+loadIns r  ZeroPageNoReg = setReg r =<< getMem . fromIntegral =<<  getIm -- r = [nn]
 
 loadIns r1 (ZeroPage r2) = do -- r1 = [nn + r2]
-    pc <- getPC
-    rval <- getReg r2
-    val <- getMem . fromIntegral . (rval +)  =<< getMem (pc + 1)
+    val <- getMem . fromIntegral =<< (+) <$> getReg r2 <*> getIm
     setReg r1 val
 
-loadIns r AbsoluteNoReg = do -- r = [nnnn]
-    pc <- getPC
-    val <- getMem =<< concatBytesLe <$> getMem (pc + 1) <*> getMem (pc + 2)
-    setReg r val
+loadIns r AbsoluteNoReg = setReg r  =<< getMem =<< getImm -- r = [nnnn]
 
 loadIns r1 (Absolute r2) = do -- r = [nnnn + r2]
-    pc <- getPC
-    r2val <- fromIntegral <$> getReg r2
-    nnnn <- concatBytesLe <$> getMem (pc + 1) <*> getMem (pc + 2)
-    val <- getMem $ nnnn + r2val
+    val <- getMem =<< (+) <$> (fromIntegral <$> getReg r2) <*> getImm
     setReg r1 val
 
 loadIns r IndirectX = do -- r = [[nn + X]]
-    pc <- getPC
-    x <- fromIntegral <$> getX
-    nn <- fromIntegral <$> getMem (pc + 1)
-    val <- getMem . fromIntegral =<< getMem (nn + x)
+    val <- getMem . fromIntegral =<< getMem . fromIntegral =<< (+) <$> getX <*> getIm
     setReg r val
 
 loadIns r IndirectY = do -- r = [[nn] + Y]
-    pc <- getPC
-    y <- fromIntegral <$> getY
-    nnMem <- fromIntegral <$> (getMem . fromIntegral =<< getMem (pc + 1))
-    val <- getMem (nnMem + y)
+    val <- getMem . fromIntegral =<< (+) <$> (getMem . fromIntegral =<< getIm) <*>  getY
     setReg r val
+
+-- |Store Instruction (Move Reg to Mem)
+storeIns :: Reg -> AddressingMode -> CPUState()
+storeIns r  ZeroPageNoReg = do -- [nn] = r
+    val <- getReg r
+    addr <- getIm 
+    setMem val (fromIntegral addr)
+
+storeIns r1 (ZeroPage r2) = do --[nn + r2] = r1
+    val <- getReg r1
+    addr <- (+) <$> getIm <*> getReg r2
+    setMem val(fromIntegral addr)
+
+storeIns r AbsoluteNoReg = do -- [nnnn] = r
+    val <- getReg r
+    addr <- getImm
+    setMem val addr
+
+storeIns r1 (Absolute r2) = do -- [nnnn + r2] = r1
+    val <- getReg r1
+    addr <- (+) <$> getImm <*> (fromIntegral <$> getReg r2)
+    setMem val addr
+
+storeIns r IndirectX = do -- [[nn + X]] = r
+    val <- getReg r
+    addr <- getMem . fromIntegral =<< ((+) <$> getIm <*> getX)
+    setMem val (fromIntegral addr)
+
+storeIns r IndirectY = do -- [[nn] + Y] = r
+    val <- getReg r
+    addr <- (+) <$> getY <*> (getMem . fromIntegral =<< getIm)
+    setMem val (fromIntegral addr)
+
 
 -- Get/Set all Registers from CPU
 getRegs :: CPUState Registers
@@ -122,7 +142,7 @@ setS w = getRegs >>= \regs -> setRegs $ regs {status = w}
 setPC :: Word16 -> CPUState ()
 setPC w = getRegs >>= \regs -> setRegs $ regs {pc = w}
 
--- Get Registers
+--  |Get Registers
 getA :: CPUState Word8
 getA = getRegs >>= return . regA
 
@@ -138,6 +158,16 @@ getS = getRegs >>= return . status
 getPC :: CPUState Word16
 getPC = getRegs >>= return . pc
 -- Memory
+
+getIm :: CPUState Word8
+getIm = do
+    pc <- getPC
+    getMem (pc + 1)
+    
+getImm :: CPUState Word16
+getImm = do
+    pc <- getPC
+    concatBytesLe <$> getMem (pc + 1) <*> getMem (pc + 2)
 
 getAllMem :: CPUState Memory
 getAllMem = get >>= return . memory
@@ -168,15 +198,16 @@ executeOpCode :: Word8 -> CPUState ()
 executeOpCode op
     -- Register/Immediate to Register Transfer 
     
-    | op == 0xA8 = loadIns Y (Implied A)
-    | op == 0xAA = loadIns X (Implied A)
-    | op == 0xBA = loadIns X (Implied S)
-    | op == 0x98 = loadIns A (Implied Y)
-    | op == 0x8A = loadIns A (Implied X)
-    | op == 0x9A = loadIns S (Implied X)
-    | op == 0xA9 = loadIns A Immediate
-    | op == 0xA2 = loadIns X Immediate
-    | op == 0xA0 = loadIns Y Immediate
+    | op == 0xA8 = moveRegIns Y A
+    | op == 0xAA = moveRegIns X A
+    | op == 0xBA = moveRegIns X S
+    | op == 0x98 = moveRegIns A Y
+    | op == 0x8A = moveRegIns A X
+    | op == 0x9A = moveRegIns S X
+
+    | op == 0xA9 = loadRegIm A 
+    | op == 0xA2 = loadRegIm X 
+    | op == 0xA0 = loadRegIm Y 
 
     -- Load Register From Memory
     
@@ -198,7 +229,23 @@ executeOpCode op
     | op == 0xAC = loadIns Y AbsoluteNoReg
     | op == 0xBC = loadIns Y (Absolute Y)
     
+    -- Store Register into Memory
+
+    | op == 0x85 = storeIns A ZeroPageNoReg        
+    | op == 0x95 = storeIns A (ZeroPage X)      
+    | op == 0x8D = storeIns A AbsoluteNoReg      
+    | op == 0x9D = storeIns A (Absolute X)      
+    | op == 0x99 = storeIns A (Absolute Y)      
+    | op == 0x81 = storeIns A IndirectX      
+    | op == 0x91 = storeIns A IndirectY  
+        
+    | op == 0x86 = storeIns X ZeroPageNoReg       
+    | op == 0x96 = storeIns X (ZeroPage Y)      
+    | op == 0x8E = storeIns X AbsoluteNoReg   
        
+    | op == 0x84 = storeIns Y ZeroPageNoReg      
+    | op == 0x94 = storeIns Y (ZeroPage X)      
+    | op == 0x8C = storeIns Y AbsoluteNoReg      
         
 
 
