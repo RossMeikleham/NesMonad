@@ -38,7 +38,7 @@ data AddressingMode =
     ZeroPageNoReg | ZeroPage Reg | AbsoluteNoReg |
     Absolute Reg | IndirectX | IndirectY
 
-data Reg = A | B | X | Y | S 
+data Reg = A | B | X | Y | S | SP
 
 
 getReg :: Reg -> CPUState Word8
@@ -46,13 +46,14 @@ getReg A = getA
 getReg X = getX
 getReg Y = getY
 getReg S = getS
+getReg SP = getSP
 
 setReg :: Reg -> Word8 -> CPUState()
 setReg A = setA
 setReg X = setX
 setReg Y = setY
 setReg S = setS
-
+setReg SP = setSP
 
 -- | Move Reg to Reg
 moveRegIns :: Reg -> Reg -> CPUState () 
@@ -119,6 +120,23 @@ storeIns r IndirectY = do -- [[nn] + Y] = r
     setMem val (fromIntegral addr)
 
 
+-- | Push value from Register into Stack
+pushIns ::Reg -> CPUState()
+pushIns r  = do -- [SP] = r, SP = SP - 1
+    addr <- getSP
+    val <- getReg r
+    setMem addr (fromIntegral val)
+    setReg r (val + 1) 
+
+-- | Pop value from Stack into Register
+popIns :: Reg -> CPUState()
+popIns r = do -- SP = SP + 1, r = [SP]
+    sp <- getSP
+    val <- getMem $ fromIntegral (sp + 1)
+    setReg r val
+    setReg SP (sp + 1) 
+
+
 -- Get/Set all Registers from CPU
 getRegs :: CPUState Registers
 getRegs = get >>= return . registers
@@ -139,6 +157,9 @@ setY w = getRegs >>= \regs -> setRegs $ regs {regY = w}
 setS :: Word8 -> CPUState ()
 setS w = getRegs >>= \regs -> setRegs $ regs {status = w}
 
+setSP :: Word8 -> CPUState()
+setSP w = getRegs >>= \regs -> setRegs $ regs {stackPtr = w}
+
 setPC :: Word16 -> CPUState ()
 setPC w = getRegs >>= \regs -> setRegs $ regs {pc = w}
 
@@ -154,6 +175,9 @@ getY = getRegs >>= return . regY
 
 getS :: CPUState Word8
 getS = getRegs >>= return . status
+
+getSP :: CPUState Word8
+getSP = getRegs >>= return . stackPtr
 
 getPC :: CPUState Word16
 getPC = getRegs >>= return . pc
@@ -247,5 +271,9 @@ executeOpCode op
     | op == 0x94 = storeIns Y (ZeroPage X)      
     | op == 0x8C = storeIns Y AbsoluteNoReg      
         
-
+    -- Push/Pop registers from Stack
+    | op == 0x48 = pushIns A
+    | op == 0x08 = pushIns S
+    | op == 0x68 = popIns  A
+    | op == 0x28 = popIns  S
 
