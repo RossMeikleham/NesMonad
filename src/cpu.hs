@@ -130,6 +130,47 @@ decIns mode = do
     val <- obtainModeVal mode
     setModeVal (val - 1) mode
 
+
+shiftLReg :: Reg -> CPUState()
+shiftLReg reg = setReg reg =<< (shiftL) <$> (getReg reg) <*> (pure 1)
+
+shiftLIns :: AddressingMode -> CPUState()
+shiftLIns mode = do
+    val <- obtainModeVal mode
+    setModeVal (val `shiftL` 1) mode
+
+shiftRReg :: Reg -> CPUState()
+shiftRReg reg = setReg reg =<< (shiftR) <$> (getReg reg) <*> (pure 1)
+
+
+shiftRIns :: AddressingMode -> CPUState()
+shiftRIns mode = do 
+    val <- obtainModeVal mode
+    setModeVal (val `shiftR` 1) mode
+
+
+rotateLReg :: Reg -> CPUState()
+rotateLReg reg = setReg reg =<< (+) <$> (shiftL <$> (getReg reg) <*> (pure 1)) <*> getCarry
+
+rotateLIns :: AddressingMode -> CPUState()
+rotateLIns mode = do
+    val <- obtainModeVal mode
+    carry <- getCarry
+    setModeVal ((val `shiftL` 1) + carry) mode
+
+rotateRReg :: Reg -> CPUState()
+rotateRReg reg = do
+    val <- getReg reg
+    carry <- getCarry
+    setReg reg  $ (val `shiftR` 1) + (carry * 0x80)
+
+rotateRIns :: AddressingMode -> CPUState()
+rotateRIns mode = do
+    val <- obtainModeVal mode
+    carry <- getCarry
+    setModeVal ((val `shiftR` 1) + (carry * 0x80)) mode
+
+
 -- | Obtain 8 bit value for given addressing mode
 obtainModeVal :: AddressingMode -> CPUState Word8
 obtainModeVal mode = case mode of
@@ -387,4 +428,28 @@ executeOpCode op
     | op == 0xC8 = decReg X
     | op == 0x88 = decReg Y
     
+    -- Rotate/Shift instructions
+    | op == 0x0A = shiftLReg A
+    | op == 0x06 = shiftLIns ZeroPageNoReg
+    | op == 0x16 = shiftLIns (ZeroPage X)
+    | op == 0x0E = shiftLIns AbsoluteNoReg
+    | op == 0x1E = shiftLIns (Absolute X)
+
+    | op == 0x4A = shiftRReg A
+    | op == 0x46 = shiftRIns ZeroPageNoReg
+    | op == 0x56 = shiftRIns (ZeroPage X)
+    | op == 0x4E = shiftRIns AbsoluteNoReg
+    | op == 0x5E = shiftRIns (Absolute X)
+
+    | op == 0x2A = rotateLReg A
+    | op == 0x26 = rotateLIns ZeroPageNoReg
+    | op == 0x36 = rotateLIns (ZeroPage X)
+    | op == 0x2E = rotateLIns AbsoluteNoReg
+    | op == 0x3E = rotateLIns (Absolute X)
+
+    | op == 0x6A = rotateRReg A
+    | op == 0x66 = rotateRIns ZeroPageNoReg
+    | op == 0x76 = rotateRIns (ZeroPage X)
+    | op == 0x6E = rotateRIns AbsoluteNoReg
+    | op == 0x7E = rotateRIns (Absolute X)
 
