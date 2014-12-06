@@ -86,90 +86,123 @@ popIns r = do -- SP = SP + 1, r = [SP]
 
 
 -- | ALU Instructions
+
+-- Add with carry value from Accumulator
 adcIns :: AddressingMode -> CPUState ()
 adcIns mode = setA =<< (add3 <$> getCarry <*> getA <*> n)
   where n = obtainModeVal mode 
 
+-- Subtract with Carry value from Accumulator
 sbcIns :: AddressingMode -> CPUState()
 sbcIns mode = setA =<< sub3 <$> ((+) <$> getA <*> getCarry) <*> pure 1 <*> n
   where sub3 a b c = a - b - c
         n = obtainModeVal mode
 
+-- AND Accumulator with value
 andIns :: AddressingMode -> CPUState()
 andIns mode = setA =<< (.&.) <$> getA <*> n
   where n = obtainModeVal mode
 
+-- XOR Accumulator with value
 xorIns :: AddressingMode -> CPUState()
 xorIns mode = setA =<< xor <$> getA <*> n
     where n = obtainModeVal mode
 
+-- Or Accumulator with value
 orIns :: AddressingMode -> CPUState()
 orIns mode = setA =<< (.|.) <$> getA <*> n
   where n = obtainModeVal mode
 
+-- Compare register against value, and set appropriate flags
 compareIns :: Reg -> AddressingMode -> CPUState()
 compareIns _ _ = return () --TODO flags 
+
 
 bitTestIns :: AddressingMode -> CPUState()
 bitTestIns _ = return () -- TODO flags
 
 
+-- Incrememnt value in register by 1
 incReg :: Reg -> CPUState()
 incReg reg = setReg reg =<< (+) <$> (getReg reg) <*> (pure 1)
 
+-- Increment value by 1
 incIns :: AddressingMode -> CPUState()
 incIns mode = do 
     val <- obtainModeVal mode
     setModeVal (val + 1) mode  
 
+-- Decrement value in register by 1
 decReg :: Reg -> CPUState()
 decReg reg = setReg reg =<< (-) <$> (getReg reg) <*> (pure 1)
 
+-- Decrement value by 1
 decIns :: AddressingMode -> CPUState()
 decIns mode = do
     val <- obtainModeVal mode
     setModeVal (val - 1) mode
 
 
+-- shift register left
 shiftLReg :: Reg -> CPUState()
 shiftLReg reg = setReg reg =<< (shiftL) <$> (getReg reg) <*> (pure 1)
 
+-- Shift left
 shiftLIns :: AddressingMode -> CPUState()
 shiftLIns mode = do
     val <- obtainModeVal mode
     setModeVal (val `shiftL` 1) mode
 
+-- Shift register right
 shiftRReg :: Reg -> CPUState()
 shiftRReg reg = setReg reg =<< (shiftR) <$> (getReg reg) <*> (pure 1)
 
-
+-- Shift right 
 shiftRIns :: AddressingMode -> CPUState()
 shiftRIns mode = do 
     val <- obtainModeVal mode
     setModeVal (val `shiftR` 1) mode
 
 
+-- Rotate register Left through carry bit
 rotateLReg :: Reg -> CPUState()
 rotateLReg reg = setReg reg =<< (+) <$> (shiftL <$> (getReg reg) <*> (pure 1)) <*> getCarry
 
+-- Rotate Left through carry bit
 rotateLIns :: AddressingMode -> CPUState()
 rotateLIns mode = do
     val <- obtainModeVal mode
     carry <- getCarry
     setModeVal ((val `shiftL` 1) + carry) mode
 
+-- Rotate register Right through carry bit
 rotateRReg :: Reg -> CPUState()
 rotateRReg reg = do
     val <- getReg reg
     carry <- getCarry
     setReg reg  $ (val `shiftR` 1) + (carry * 0x80)
 
+-- Rotate Right through carry bit
 rotateRIns :: AddressingMode -> CPUState()
 rotateRIns mode = do
     val <- obtainModeVal mode
     carry <- getCarry
     setModeVal ((val `shiftR` 1) + (carry * 0x80)) mode
 
+-- Unconditional Jump to Immediate 16 bit address
+jmpWordIns :: CPUState()
+jmpWordIns = setPC =<< getImm
+
+-- Unconditional Jump to 
+{-jmpMemWordIns :: CPUState()
+jmpMemWordIns 
+mode = setPC val
+ where val = case mode of
+    ZeroPageNoReg -> getImm
+    AbsoluteNoReg -> if getImm
+    _ -> error "Jump instruction not defined for addressing modes that are not"
+        ++ " ZeroPage or Absolute"
+-}
 
 -- | Obtain 8 bit value for given addressing mode
 obtainModeVal :: AddressingMode -> CPUState Word8
@@ -179,8 +212,19 @@ obtainModeVal mode = case mode of
     ZeroPage reg -> getMem . fromIntegral =<< (+) <$> getIm <*> getReg reg
     AbsoluteNoReg -> getMem =<< getImm
     Absolute reg -> getMem =<< (+) <$> getImm <*> (fromIntegral <$> (getReg reg))
-    IndirectX -> getMem . fromIntegral =<< getMem . fromIntegral =<< (+) <$> getIm <*> getX 
-    IndirectY -> getMem . fromIntegral =<< (+) <$> (getMem . fromIntegral =<< getIm) <*> getY
+    IndirectX -> do
+        im <- getIm
+        x <- getX 
+        addr <- concatBytesLe <$> (getMem $ fromIntegral (im + x)) 
+                              <*> (getMem $ fromIntegral (im + x + 1)) 
+        getMem addr
+
+    IndirectY -> do 
+        im <- getIm
+        addr1 <- getMem $ fromIntegral im
+        addr2 <- getMem $ fromIntegral (im + 1)
+        y <- getY
+        getMem $ (concatBytesLe addr1 addr2)  + (fromIntegral y) 
 
 setModeVal :: Word8 -> AddressingMode -> CPUState ()
 setModeVal w8 mode = case mode of
@@ -189,8 +233,18 @@ setModeVal w8 mode = case mode of
     ZeroPage reg -> (setMem w8) . fromIntegral =<< (+) <$> getIm <*> getReg reg
     AbsoluteNoReg -> setMem w8 =<< getImm
     Absolute reg -> setMem w8 =<< (+) <$> getImm <*> (fromIntegral <$> (getReg reg))
-    IndirectX -> (setMem w8) . fromIntegral =<< getMem . fromIntegral =<< (+) <$> getIm <*> getX 
-    IndirectY -> (setMem w8) . fromIntegral =<< (+) <$> (getMem . fromIntegral =<< getIm) <*> getY
+    IndirectX -> do
+        im <- getIm 
+        x <- getX
+        addr <- concatBytesLe <$> (getMem $ fromIntegral (im + x)) 
+                              <*> (getMem $ fromIntegral (im + x + 1)) 
+        setMem w8 addr
+    IndirectY -> do
+        im <- getIm
+        addr1 <- getMem $ fromIntegral im
+        addr2 <- getMem $ fromIntegral (im + 1)
+        y <- getY
+        setMem w8 $ (concatBytesLe addr1 addr2)  + (fromIntegral y) 
 
 
 -- Get/Set all Registers from CPU
