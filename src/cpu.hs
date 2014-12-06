@@ -273,6 +273,37 @@ jmpCond b = if b then goToOffset else return ()
         let im' = (fromIntegral im :: Word16)
         setPC $ pc + (im' .&. 127) - (im' .&. 128)
 
+-- Clear carry flag
+clearCarryIns :: CPUState () 
+clearCarryIns = setS =<< ((0xFF - 0x1) .&.) <$> getS
+
+-- Clear interrupt disable bit
+clearIntDisableIns :: CPUState ()
+clearIntDisableIns = setS =<< ((0xFF - 0x4) .&.) <$> getS 
+
+-- Clear Decimal mode
+clearDecimalIns :: CPUState ()
+clearDecimalIns = setS =<< ((0xFF - 0x8) .&.) <$> getS
+
+-- Clear Overflow flag
+clearOverflowIns :: CPUState ()
+clearOverflowIns = setS =<< ((0xFF - 0x40) .&.) <$> getS
+
+-- Set Carry flag
+setCarryIns :: CPUState () 
+setCarryIns = setS =<< (0x1 .|.) <$> getS 
+
+-- Set interrupt disable bit
+setIntDisableIns :: CPUState ()
+setIntDisableIns = setS =<< (0x4 .|.) <$> getS 
+
+-- Set Decimal mode
+setDecimalIns :: CPUState ()
+setDecimalIns = setS =<< (0x40 .|.) <$> getS 
+
+-- Do nothing nop
+nopIns ::CPUState ()
+nopIns = return ()
 
 -- | Obtain 8 bit value for given addressing mode
 obtainModeVal :: AddressingMode -> CPUState Word8
@@ -329,6 +360,8 @@ pop = do
     val <- getMem $ 1 + 0x100 + (fromIntegral addr) 
     setSP (addr + 1)
     return val 
+
+
 
 -- Get/Set all Registers from CPU
 getRegs :: CPUState Registers
@@ -417,16 +450,16 @@ setMem val loc = do
  where updatedIndex = VU.fromList [(fromIntegral loc, val)]
 
 getCarry :: CPUState Bool
-getCarry = getS >>= \s -> return $ (s .&. 0x80) /= 0
+getCarry = getS >>= \s -> return $ (s .&. 0x1) /= 0
 
 getNeg :: CPUState Bool
-getNeg = getS >>= \s -> return $ (s .&. 0x1) /= 0
+getNeg = getS >>= \s -> return $ (s .&. 0x80) /= 0
 
 getZero :: CPUState Bool
-getZero = getS >>= \s -> return $ (s .&. 0x40) /= 0
+getZero = getS >>= \s -> return $ (s .&. 0x2) /= 0
 
 getOverflow :: CPUState Bool
-getOverflow = getS >>= \s -> return $ (s .&. 0x2) /= 0
+getOverflow = getS >>= \s -> return $ (s .&. 0x40) /= 0
 
 boolToBit :: Bool -> Word8
 boolToBit b = if b then 1 else 0
@@ -618,3 +651,15 @@ executeOpCode op
     | op == 0xB0 = jmpCarryIns
     | op == 0xD0 = jmpNotZeroIns
     | op == 0xF0 = jmpCarryIns
+
+    -- Control instructions
+
+    | op == 0x18 = clearCarryIns 
+    | op == 0x58 = clearIntDisableIns
+    | op == 0xD8 = clearDecimalIns
+    | op == 0xB8 = clearOverflowIns
+    | op == 0x38 = setCarryIns
+    | op == 0x78 = setIntDisableIns
+    | op == 0xF8 = setDecimalIns
+
+    | op == 0xEA= nopIns
