@@ -70,33 +70,31 @@ storeIns reg mode = (\v -> setModeVal v mode) =<< getReg reg
 
 -- | Push value from Register into Stack
 pushIns ::Reg -> CPUState()
-pushIns r  = do -- [SP] = r, SP = SP - 1
-    addr <- getSP
-    val <- getReg r
-    setMem addr (fromIntegral val)
-    setReg r (val + 1) 
+pushIns r  = push =<< getReg r
 
 -- | Pop value from Stack into Register
 popIns :: Reg -> CPUState()
-popIns r = do -- SP = SP + 1, r = [SP]
-    sp <- getSP
-    val <- getMem $ fromIntegral (sp + 1)
-    setReg r val
-    setReg SP (sp + 1) 
-
+popIns r = setReg r =<< pop 
+    
 
 -- | ALU Instructions
 
 -- Add with carry value from Accumulator
 adcIns :: AddressingMode -> CPUState ()
-adcIns mode = setA =<< (add3 <$> getCarry <*> getA <*> n)
-  where n = obtainModeVal mode 
+adcIns mode = setA =<< (add3 <$> carryBit <*> getA <*> n)
+  where n = obtainModeVal mode
+        carryBit = do 
+            carrySet <- getCarry
+            return $ boolToBit carrySet
 
 -- Subtract with Carry value from Accumulator
 sbcIns :: AddressingMode -> CPUState()
-sbcIns mode = setA =<< sub3 <$> ((+) <$> getA <*> getCarry) <*> pure 1 <*> n
+sbcIns mode = setA =<< sub3 <$> ((+) <$> getA <*> carryBit) <*> pure 1 <*> n
   where sub3 a b c = a - b - c
         n = obtainModeVal mode
+        carryBit = do 
+            carrySet <- getCarry
+            return $ boolToBit carrySet
 
 -- AND Accumulator with value
 andIns :: AddressingMode -> CPUState()
@@ -166,43 +164,115 @@ shiftRIns mode = do
 
 -- Rotate register Left through carry bit
 rotateLReg :: Reg -> CPUState()
-rotateLReg reg = setReg reg =<< (+) <$> (shiftL <$> (getReg reg) <*> (pure 1)) <*> getCarry
+rotateLReg reg = setReg reg =<< (+) <$> (shiftL <$> (getReg reg) <*> (pure 1)) <*> carryBit
+  where carryBit = getCarry >>= return . boolToBit
 
 -- Rotate Left through carry bit
 rotateLIns :: AddressingMode -> CPUState()
 rotateLIns mode = do
     val <- obtainModeVal mode
-    carry <- getCarry
+    carry <- carryBit
     setModeVal ((val `shiftL` 1) + carry) mode
+  where carryBit = getCarry >>= return . boolToBit
 
 -- Rotate register Right through carry bit
 rotateRReg :: Reg -> CPUState()
 rotateRReg reg = do
     val <- getReg reg
-    carry <- getCarry
+    carry <- carryBit
     setReg reg  $ (val `shiftR` 1) + (carry * 0x80)
+  where carryBit = getCarry >>= return . boolToBit
 
 -- Rotate Right through carry bit
 rotateRIns :: AddressingMode -> CPUState()
 rotateRIns mode = do
     val <- obtainModeVal mode
-    carry <- getCarry
+    carry <- carryBit
     setModeVal ((val `shiftR` 1) + (carry * 0x80)) mode
+  where carryBit = getCarry >>= return . boolToBit
 
 -- Unconditional Jump to Immediate 16 bit address
 jmpWordIns :: CPUState()
 jmpWordIns = setPC =<< getImm
 
 -- Unconditional Jump to 
-{-jmpMemWordIns :: CPUState()
-jmpMemWordIns 
-mode = setPC val
- where val = case mode of
-    ZeroPageNoReg -> getImm
-    AbsoluteNoReg -> if getImm
-    _ -> error "Jump instruction not defined for addressing modes that are not"
-        ++ " ZeroPage or Absolute"
--}
+jmpMemWordIns :: CPUState()
+jmpMemWordIns = do
+    addr <- getImm
+    if addr .&. 0xFF /= 0xFF -- Check if page boundary crossed
+        then setPC =<< concatBytesLe <$> getMem addr <*> getMem (addr + 1)
+        -- jmp can't cross page boundaries so msb obtained from start
+        -- of page 
+        else setPC =<< concatBytesLe <$> getMem addr <*> getMem (addr - 0xFF) 
+
+-- Call instruction, push PC to stack and jump
+callIns :: CPUState ()
+callIns = do
+    pc <- getPC
+    push $ fromIntegral $ ((pc - 1) `shiftR` 8)
+    push $ fromIntegral $ ((pc - 1) .&. 0xFF)
+    addr <- getImm
+    setPC addr  
+
+-- Return from Interrupt
+retIIns :: CPUState ()
+retIIns = do
+    p <- pop
+    low <- pop
+    high <- pop
+    setPC $ concatBytesLe low high
+    setS p
+
+
+-- Return from Subroutine
+retSIns :: CPUState ()
+retSIns = do
+    low <- pop
+    high <- pop
+    setPC $ 1 + concatBytesLe low high
+    
+-- Branch if not negative
+jmpNotNegIns :: CPUState ()
+jmpNotNegIns = jmpCond . not =<< getNeg
+    
+-- Branch if negative 
+jmpNegIns :: CPUState ()
+jmpNegIns = jmpCond =<< getNeg
+
+-- Branch if not zero
+jmpNotZeroIns :: CPUState ()
+jmpNotZeroIns = jmpCond . not  =<< getZero 
+
+-- Branch if zero
+jmpZeroIns :: CPUState()
+jmpZeroIns = jmpCond =<< getZero
+
+-- Branch if no carry
+jmpNoCarryIns :: CPUState()
+jmpNoCarryIns = jmpCond . not =<< getCarry
+
+-- Branch if carry
+jmpCarryIns :: CPUState()
+jmpCarryIns = jmpCond =<< getCarry
+
+-- Branch if no overflow
+jmpNoOverflowIns :: CPUState()
+jmpNoOverflowIns = jmpCond . not =<< getOverflow
+
+-- Branch if overflow
+jmpOverflowIns :: CPUState()
+jmpOverflowIns = jmpCond =<< getOverflow
+
+-- Branch if condition met, to signed 8 bit offset
+jmpCond :: Bool -> CPUState()
+jmpCond b = if b then goToOffset else return ()
+  where 
+    goToOffset = do 
+        im <- getIm
+        pc <- getPC
+        let im' = (fromIntegral im :: Word16)
+        setPC $ pc + (im' .&. 127) - (im' .&. 128)
+
 
 -- | Obtain 8 bit value for given addressing mode
 obtainModeVal :: AddressingMode -> CPUState Word8
@@ -246,6 +316,19 @@ setModeVal w8 mode = case mode of
         y <- getY
         setMem w8 $ (concatBytesLe addr1 addr2)  + (fromIntegral y) 
 
+push :: Word8 -> CPUState () -- [SP] = val, SP = SP - 1
+push w8 = do
+    addr <- getSP
+    setMem w8 $ 0x100 + (fromIntegral addr) 
+    setSP (addr - 1)
+
+
+pop :: CPUState (Word8) -- SP = SP + 1, val = [SP]
+pop = do
+    addr <- getSP
+    val <- getMem $ 1 + 0x100 + (fromIntegral addr) 
+    setSP (addr + 1)
+    return val 
 
 -- Get/Set all Registers from CPU
 getRegs :: CPUState Registers
@@ -333,8 +416,20 @@ setMem val loc = do
     setAllMem $ Memory $ VU.update mem updatedIndex
  where updatedIndex = VU.fromList [(fromIntegral loc, val)]
 
-getCarry :: CPUState Word8
-getCarry = getS >>= \s -> return (shiftR (s .&. 0x80) 7) 
+getCarry :: CPUState Bool
+getCarry = getS >>= \s -> return $ (s .&. 0x80) /= 0
+
+getNeg :: CPUState Bool
+getNeg = getS >>= \s -> return $ (s .&. 0x1) /= 0
+
+getZero :: CPUState Bool
+getZero = getS >>= \s -> return $ (s .&. 0x40) /= 0
+
+getOverflow :: CPUState Bool
+getOverflow = getS >>= \s -> return $ (s .&. 0x2) /= 0
+
+boolToBit :: Bool -> Word8
+boolToBit b = if b then 1 else 0
 
 -- Concatonate 2 bytes into 16 byte little endian word
 -- first byte given is lower half of the word, second is upper half
@@ -507,3 +602,19 @@ executeOpCode op
     | op == 0x6E = rotateRIns AbsoluteNoReg
     | op == 0x7E = rotateRIns (Absolute X)
 
+    -- Jump/Call instructions
+    
+    | op == 0x4C = jmpWordIns
+    | op == 0x6C = jmpMemWordIns
+    | op == 0x20 = callIns
+    | op == 0x40 = retIIns 
+    | op == 0x60 = retSIns
+
+    | op == 0x10 = jmpNotNegIns
+    | op == 0x30 = jmpNegIns
+    | op == 0x50 = jmpNoOverflowIns
+    | op == 0x70 = jmpOverflowIns
+    | op == 0x90 = jmpNoCarryIns
+    | op == 0xB0 = jmpCarryIns
+    | op == 0xD0 = jmpNotZeroIns
+    | op == 0xF0 = jmpCarryIns
