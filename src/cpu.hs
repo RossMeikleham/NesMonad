@@ -305,6 +305,147 @@ setDecimalIns = setS =<< (0x40 .|.) <$> getS
 nopIns ::CPUState ()
 nopIns = return ()
 
+-- Set value to A AND X, illegal opcode instruction
+saxIns :: AddressingMode -> CPUState() 
+saxIns mode = (flip setModeVal) mode =<< (.&.) <$> getA <*> getX
+
+-- Value is set to both A and X registers
+laxIns :: AddressingMode -> CPUState()
+laxIns mode = do
+    val <- obtainModeVal mode
+    setX val
+    setA val
+    
+
+-- Value at address multiplied by 2,  A = A OR value at address, Illegal opcode instruction
+sloIns :: AddressingMode -> CPUState() 
+sloIns mode = do
+    orIns mode
+    shiftLIns mode
+
+-- Value at address rotated left, A = A AND value are address, Illegal
+-- opcode instruction
+rlaIns :: AddressingMode -> CPUState()
+rlaIns mode = do
+    andIns mode
+    rotateLIns mode
+
+-- Value at address shifted right, A = A XOR value at address, Illegal
+-- opcode instruction
+sreIns :: AddressingMode -> CPUState ()
+sreIns mode = do
+    xorIns mode
+    shiftRIns mode
+
+-- Value at address rotated right , A = A + value at address + carry bit,
+-- Illegal opcode instruction
+rraIns :: AddressingMode -> CPUState ()
+rraIns mode = do
+    adcIns mode
+    rotateRIns mode
+
+-- Value at address decremented, compare A with value at address 
+-- Illegal opcode instruction
+dcpIns :: AddressingMode -> CPUState ()
+dcpIns mode = do
+    compareIns A mode
+    decIns mode
+
+-- Value at address incremented, A = sbc A , value at address
+-- Illegal opcode instruction
+iscIns :: AddressingMode -> CPUState ()
+iscIns mode = do
+    sbcIns mode
+    incIns mode
+    
+-- Value at address anded with A, carry flag set to 7th bit of result
+-- TODO set carry flag
+ancIns :: AddressingMode -> CPUState ()
+ancIns mode = do
+    andIns mode
+
+-- AND value at address with A, then shift right A
+alrIns :: AddressingMode -> CPUState ()
+alrIns mode = do
+    andIns mode
+    shiftRReg A
+
+-- AND value at address with A, then rotate right A and check bits 5 and 6.
+-- If both are 1, set C and clear V flags
+-- If both are 0, clear C and V flags
+-- If bit 5 is 1 then set V and clear C flags
+-- If bit 6 is 1 then set C and V flags
+-- Illegal opcode instruction
+arrIns :: AddressingMode -> CPUState ()
+arrIns mode = do
+    andIns mode
+    rotateRReg A 
+
+-- set X to : (X AND A) - nn
+-- Illegal opcode instruction
+axsIns :: AddressingMode -> CPUState ()
+axsIns mode = setX =<< (-) <$> ((.&.) <$> getX <*> getA) <*> getIm
+
+-- Set A to A - imm, Illegal opcode instruction
+sbcIllegalIns :: AddressingMode -> CPUState ()
+sbcIllegalIns mode = setA =<< (-) <$> getA <*> getIm
+
+-- Set A,X,SP to [nnnn + Y] AND SP, Illegal opcode instruction
+lasIns :: AddressingMode -> CPUState ()
+lasIns mode = do
+    val <- obtainModeVal mode
+    sp <- getSP
+    let res = val .&. sp
+    setA res
+    setX res
+    setSP res
+
+-- A = X and Immediate Value
+xaaIns ::CPUState ()
+xaaIns = do 
+    im <- getIm
+    x <- getX
+    setA (x .&. im)
+    
+
+-- Value at address equal to A AND X AND (higher byte of PC + 1)
+-- UNSTABLE illegal opcode instruction
+ahxIns :: AddressingMode -> CPUState ()
+ahxIns mode = do
+    a <- getA
+    x <- getX 
+    pc <- getPC
+    setModeVal (a .&. x .&. ((fromIntegral (pc `shiftR` 8)) + 1)) mode
+
+-- Value at address equals Y AND (higher byte of PC + 1)
+-- UNSTABLE illegal opcode instruction
+shyIns :: AddressingMode -> CPUState ()
+shyIns mode = do 
+    y <- getY
+    pc <- getPC
+    setModeVal (y .&. ((fromIntegral (pc `shiftR` 8)) + 1)) mode
+
+-- Value at address equals X AND (higher byte of PC + 1)
+-- UNSTABLE illegal opcode instruction
+shxIns :: AddressingMode -> CPUState ()
+shxIns mode = do
+    x <- getX
+    pc <- getPC
+    setModeVal (x .&. ((fromIntegral (pc `shiftR` 8)) + 1)) mode
+
+-- SP set to X AND A, then
+-- Value at address set to SP AND (higher byte of PC + 1)
+-- UNSTABLE illegal opcode instruction
+tasIns :: AddressingMode -> CPUState ()
+tasIns mode = do
+    setSP =<< (.&.) <$> getX <*> getA
+    sp <- getSP
+    pc <- getPC
+    setModeVal (sp .&. ((fromIntegral (pc `shiftR` 8)) + 1)) mode
+
+haltIns :: CPUState ()
+haltIns = return () --TODO implement HALT
+
 -- | Obtain 8 bit value for given addressing mode
 obtainModeVal :: AddressingMode -> CPUState Word8
 obtainModeVal mode = case mode of
@@ -663,3 +804,85 @@ executeOpCode op
     | op == 0xF8 = setDecimalIns
 
     | op == 0xEA= nopIns
+
+    -- Undocumented/Illegal instructions
+    | op == 0x07 = sloIns ZeroPageNoReg
+    | op == 0x17 = sloIns (ZeroPage X)
+    | op == 0x03 = sloIns IndirectX
+    | op == 0x13 = sloIns IndirectY
+    | op == 0x0F = sloIns AbsoluteNoReg
+    | op == 0x1F = sloIns (Absolute X)
+    | op == 0x1B = sloIns (Absolute Y)
+
+    | op == 0x27 = rlaIns ZeroPageNoReg
+    | op == 0x37 = rlaIns (ZeroPage X)
+    | op == 0x23 = rlaIns IndirectX
+    | op == 0x33 = rlaIns IndirectY
+    | op == 0x2F = rlaIns AbsoluteNoReg
+    | op == 0x3F = rlaIns (Absolute X)
+    | op == 0x3B = rlaIns (Absolute Y)
+    
+    | op == 0x47 = sreIns ZeroPageNoReg
+    | op == 0x57 = sreIns (ZeroPage X)
+    | op == 0x43 = sreIns IndirectX
+    | op == 0x53 = sreIns IndirectY
+    | op == 0x4F = sreIns AbsoluteNoReg
+    | op == 0x5F = sreIns (Absolute X)
+    | op == 0x5B = sreIns (Absolute Y)
+
+    | op == 0x67 = rraIns ZeroPageNoReg
+    | op == 0x77 = rraIns (ZeroPage X)
+    | op == 0x63 = rraIns IndirectX
+    | op == 0x73 = rraIns IndirectY
+    | op == 0x6F = rraIns AbsoluteNoReg
+    | op == 0x7F = rraIns (Absolute X)
+    | op == 0x7B = rraIns (Absolute Y)
+
+    | op == 0x87 = saxIns ZeroPageNoReg
+    | op == 0x97 = saxIns (ZeroPage Y)
+    | op == 0x83 = saxIns IndirectX
+    | op == 0x8F = saxIns AbsoluteNoReg
+
+    | op == 0xA7 = laxIns ZeroPageNoReg
+    | op == 0xB7 = laxIns (ZeroPage Y)
+    | op == 0xA3 = laxIns IndirectX
+    | op == 0xB3 = laxIns IndirectY
+    | op == 0xAF = laxIns AbsoluteNoReg
+    | op == 0xBF = laxIns (Absolute Y)
+
+    | op == 0xC7 = dcpIns ZeroPageNoReg
+    | op == 0xD7 = dcpIns (ZeroPage X)
+    | op == 0xC3 = dcpIns IndirectX
+    | op == 0xD3 = dcpIns IndirectY
+    | op == 0xCF = dcpIns AbsoluteNoReg
+    | op == 0xDF = dcpIns (Absolute X)
+    | op == 0xDB = dcpIns (Absolute Y)
+    
+    | op == 0xE7 = iscIns ZeroPageNoReg
+    | op == 0xF7 = iscIns (ZeroPage X)
+    | op == 0xE3 = iscIns IndirectX
+    | op == 0xF3 = iscIns IndirectY
+    | op == 0xEF = iscIns AbsoluteNoReg
+    | op == 0xFF = iscIns (Absolute X)
+    | op == 0xFB = iscIns (Absolute Y)
+
+    | op == 0x0B = ancIns Immediate
+    | op == 0x2B = ancIns Immediate
+    | op == 0x4B = alrIns Immediate
+    | op == 0x6B = arrIns Immediate
+
+    -- HIGHLY UNSTABLE instructions
+    | op == 0x8B = xaaIns 
+    | op == 0xAB = laxIns Immediate
+
+    | op == 0xCB = axsIns Immediate
+    | op == 0xEB = sbcIllegalIns Immediate
+    
+    -- UNSTABLE instructions
+    | op == 0x93 = ahxIns IndirectY
+    | op == 0x9F = ahxIns (Absolute Y)
+    | op == 0x9C = shyIns (Absolute X)
+    | op == 0x9E = shxIns (Absolute Y)
+    | op == 0x9B = tasIns (Absolute Y)
+
+    | op == 0xBB = lasIns (Absolute Y)
