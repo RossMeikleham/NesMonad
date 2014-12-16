@@ -38,7 +38,7 @@ data AddressingMode =
     Immediate | ZeroPageNoReg | ZeroPage Reg | AbsoluteNoReg |
     Absolute Reg | IndirectX | IndirectY
 
-data Reg = A | B | X | Y | S | SP
+data Reg = A | B | X | Y | S | SP deriving (Eq)
 
 
 getReg :: Reg -> CPUState Word8
@@ -57,11 +57,21 @@ setReg SP = setSP
 
 -- | Move Reg to Reg
 moveRegIns :: Reg -> Reg -> CPUState () 
-moveRegIns r1 r2 = setReg r1 =<< getReg r2 -- r1 = r2
-
--- |Load Instruction (Moe Mem to Reg)
+moveRegIns r1 r2 = do --r1 := r2
+    val <- getReg r2
+    setReg r1 val 
+    if r1 /= S then do
+        checkNegFlag val
+        checkZeroFlag val
+    else
+        return ()
+-- |Load Instruction (Mem to Reg)
 loadIns :: Reg -> AddressingMode -> CPUState()
-loadIns reg mode = setReg reg =<< obtainModeVal mode
+loadIns reg mode = do 
+    val <- obtainModeVal mode
+    setReg reg val
+    checkNegFlag val
+    checkZeroFlag val
 
 -- |Store Instruction (Move Reg to Mem)
 storeIns :: Reg -> AddressingMode -> CPUState()
@@ -74,7 +84,14 @@ pushIns r  = push =<< getReg r
 
 -- | Pop value from Stack into Register
 popIns :: Reg -> CPUState()
-popIns r = setReg r =<< pop 
+popIns r = do
+    val <- pop 
+    setReg r val
+    if r == A then do
+        checkNegFlag val
+        checkZeroFlag val
+    else 
+        return ()
     
 
 -- | ALU Instructions
@@ -114,7 +131,6 @@ orIns mode = setA =<< (.|.) <$> getA <*> n
 -- Compare register against value, and set appropriate flags
 compareIns :: Reg -> AddressingMode -> CPUState()
 compareIns _ _ = return () --TODO flags 
-
 
 bitTestIns :: AddressingMode -> CPUState()
 bitTestIns _ = return () -- TODO flags
@@ -601,6 +617,33 @@ getZero = getS >>= \s -> return $ (s .&. 0x2) /= 0
 
 getOverflow :: CPUState Bool
 getOverflow = getS >>= \s -> return $ (s .&. 0x40) /= 0
+
+
+setFlag :: Word8 -> Bool -> CPUState ()
+setFlag bits state = do
+    s <- getS
+    setS $ op s
+  where op = if state then (.&. (0xFF - bits)) else (.|. bits)
+
+setCarry :: Bool -> CPUState ()
+setCarry = setFlag 0x1 
+
+setNeg :: Bool -> CPUState ()
+setNeg = setFlag 0x80
+
+setZero :: Bool -> CPUState ()
+setZero = setFlag 0x2
+
+setOverflow :: Bool -> CPUState ()
+setOverflow = setFlag 0x40
+
+-- Flag Checking Helper Functions --
+
+checkNegFlag :: Word8 -> CPUState ()
+checkNegFlag w8 = setNeg (w8 > 127)
+
+checkZeroFlag :: Word8 -> CPUState ()
+checkZeroFlag w8 = setZero (w8 == 0)
 
 boolToBit :: Bool -> Word8
 boolToBit b = if b then 1 else 0
