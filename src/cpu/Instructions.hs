@@ -47,115 +47,195 @@ popIns r = do
 -- | ALU Instructions
 
 -- Add with carry value from Accumulator
+-- TODO implement BCD and double check overflow calculation is correct
 adcIns :: AddressingMode -> CPUState ()
-adcIns mode = setA =<< (add3 <$> carryBit <*> getA <*> n)
-  where n = obtainModeVal mode
-        carryBit = do 
-            carrySet <- getCarry
-            return $ boolToBit carrySet
+adcIns mode = do
+    carryBit <- boolToBit <$> getCarry
+    a <- getA
+    n <- obtainModeVal mode
+    let sum = carryBit + a + n
+    setA sum
+    checkZeroFlag sum
+    setCarry (0xFF - a < n || sum == 0) -- Check sum <= 255
+    checkNegFlag sum 
+    setOverflow (((a `xor` n) .&. (a `xor` sum) .&. 0x80) /= 0) -- Check bit 7 stays the same
+
 
 -- Subtract with Carry value from Accumulator
+-- TODO implement BCD and double check overflow calculation is correct
 sbcIns :: AddressingMode -> CPUState()
-sbcIns mode = setA =<< sub3 <$> ((+) <$> getA <*> carryBit) <*> pure 1 <*> n
-  where sub3 a b c = a - b - c
-        n = obtainModeVal mode
-        carryBit = do 
-            carrySet <- getCarry
-            return $ boolToBit carrySet
+sbcIns mode = do
+  carryBit <- boolToBit <$> getCarry
+  a <- getA
+  n <- obtainModeVal mode
+  let sum = (a - n - 1) + carryBit 
+  setA sum
+  checkZeroFlag sum
+  checkNegFlag sum
+  setCarry (a > n || (a == n && carryBit == 1)) 
+  setOverflow (((n `xor` sum) .&. (a `xor` sum) .&. 0x80) /= 0)
+
 
 -- AND Accumulator with value
 andIns :: AddressingMode -> CPUState()
-andIns mode = setA =<< (.&.) <$> getA <*> n
-  where n = obtainModeVal mode
+andIns mode = do
+    val <- (.&.) <$> getA <*> obtainModeVal mode 
+    setA val
+    setZero (val == 0) 
+    setNeg  (isNeg val) 
+    
 
 -- XOR Accumulator with value
 xorIns :: AddressingMode -> CPUState()
-xorIns mode = setA =<< xor <$> getA <*> n
-    where n = obtainModeVal mode
+xorIns mode = do
+    val <- xor <$> getA <*> obtainModeVal mode
+    setA val
+    setZero (val == 0)
+    setNeg (isNeg val)
+
 
 -- Or Accumulator with value
 orIns :: AddressingMode -> CPUState()
-orIns mode = setA =<< (.|.) <$> getA <*> n
-  where n = obtainModeVal mode
+orIns mode = do
+    val <- (.|.) <$> getA <*> obtainModeVal mode
+    setA val
+    setZero (val == 0)
+    setNeg (isNeg val)
 
 -- Compare register against value, and set appropriate flags
 compareIns :: Reg -> AddressingMode -> CPUState()
-compareIns _ _ = return () --TODO flags 
+compareIns reg mode = do
+    val <- obtainModeVal mode
+    r <- getReg reg
+    setCarry (r >= val)
+    setZero  (r == val)
+    setNeg   (((r - val) .&. 0x80) == 0x80)
+
+
 
 bitTestIns :: AddressingMode -> CPUState()
-bitTestIns _ = return () -- TODO flags
+bitTestIns mode = do
+    val <- obtainModeVal mode
+    a <- getA
+    checkZeroFlag (a .&. val)
+    setOverflow (val .&. 0x40 == 0x40)
+    setNeg (val .&. 0x80 == 0x80)
 
 
 -- Incrememnt value in register by 1
 incReg :: Reg -> CPUState()
-incReg reg = setReg reg =<< (+) <$> (getReg reg) <*> (pure 1)
-
+incReg reg = do 
+    res <- (+) <$> (getReg reg) <*> (pure 1)
+    setReg reg res
+    checkZeroFlag res
+    checkNegFlag res
+     
 -- Increment value by 1
 incIns :: AddressingMode -> CPUState()
 incIns mode = do 
     val <- obtainModeVal mode
-    setModeVal (val + 1) mode  
+    let res = val + 1
+    setModeVal res mode
+    checkZeroFlag res
+    checkNegFlag res
+      
 
 -- Decrement value in register by 1
 decReg :: Reg -> CPUState()
-decReg reg = setReg reg =<< (-) <$> (getReg reg) <*> (pure 1)
+decReg reg = do
+    res <- (-) <$> (getReg reg) <*> (pure 1)
+    setReg reg res
+    checkZeroFlag res
+    checkNegFlag res
 
 -- Decrement value by 1
 decIns :: AddressingMode -> CPUState()
 decIns mode = do
     val <- obtainModeVal mode
-    setModeVal (val - 1) mode
+    let res = val - 1
+    setModeVal res mode
+    checkZeroFlag res
+    checkNegFlag res
 
 
 -- shift register left
 shiftLReg :: Reg -> CPUState()
-shiftLReg reg = setReg reg =<< (shiftL) <$> (getReg reg) <*> (pure 1)
+shiftLReg reg = do
+    rVal <- getReg reg
+    setReg reg (rVal `shiftL` 1)
+    setCarry (rVal .&. 0x80 == 0x80)
+    setNeg (rVal .&. 0x40 == 0x40)
+    setZero (rVal `xor` 0x80 == 0)
 
 -- Shift left
 shiftLIns :: AddressingMode -> CPUState()
 shiftLIns mode = do
     val <- obtainModeVal mode
     setModeVal (val `shiftL` 1) mode
+    setCarry (val .&. 0x80 == 0x80)
+    setNeg (val .&. 0x40 == 0x40)
+    setZero (val `xor` 0x80 == 0)
+
 
 -- Shift register right
 shiftRReg :: Reg -> CPUState()
-shiftRReg reg = setReg reg =<< (shiftR) <$> (getReg reg) <*> (pure 1)
+shiftRReg reg = do
+    rVal <- getReg reg
+    setReg reg (rVal `shiftR` 1)
+    setCarry (rVal .&. 0x1 == 0x1)
+    setZero (rVal <= 0x1)
+    setNeg False
 
 -- Shift right 
 shiftRIns :: AddressingMode -> CPUState()
 shiftRIns mode = do 
     val <- obtainModeVal mode
     setModeVal (val `shiftR` 1) mode
+    setCarry (val .&. 0x1 == 0x1)
+    setZero (val <= 0x1)
+    setNeg False
 
 
 -- Rotate register Left through carry bit
 rotateLReg :: Reg -> CPUState()
-rotateLReg reg = setReg reg =<< (+) <$> (shiftL <$> (getReg reg) <*> (pure 1)) <*> carryBit
-  where carryBit = getCarry >>= return . boolToBit
+rotateLReg reg = do
+    rVal <- getReg reg
+    carryBit <- boolToBit <$> getCarry
+    setReg reg ((rVal `shiftL` 1) + carryBit)
+    setCarry (rVal .&. 0x80 == 0x80)
+    setZero ((rVal `xor` 0x80 == 0) && carryBit == 0)
+    setNeg (rVal .&. 0x40 == 0x40)
 
 -- Rotate Left through carry bit
 rotateLIns :: AddressingMode -> CPUState()
 rotateLIns mode = do
     val <- obtainModeVal mode
-    carry <- carryBit
-    setModeVal ((val `shiftL` 1) + carry) mode
-  where carryBit = getCarry >>= return . boolToBit
+    carryBit <- boolToBit <$> getCarry
+    setModeVal ((val `shiftL` 1) + carryBit) mode
+    setCarry (val .&. 0x80 == 0x80)
+    setZero ((val `xor` 0x80 == 0) && carryBit == 0)
+    setNeg (val .&. 0x40 == 0x40)
 
 -- Rotate register Right through carry bit
 rotateRReg :: Reg -> CPUState()
 rotateRReg reg = do
     val <- getReg reg
-    carry <- carryBit
-    setReg reg  $ (val `shiftR` 1) + (carry * 0x80)
-  where carryBit = getCarry >>= return . boolToBit
+    carryBit <- boolToBit <$> getCarry
+    setReg reg  $ (val `shiftR` 1) + (carryBit * 0x80)
+    setCarry (val .&. 0x1 == 0x1)
+    setZero ((val <= 1) && carryBit == 0)
+    setNeg (carryBit == 0x1)
+    
 
 -- Rotate Right through carry bit
 rotateRIns :: AddressingMode -> CPUState()
 rotateRIns mode = do
     val <- obtainModeVal mode
-    carry <- carryBit
-    setModeVal ((val `shiftR` 1) + (carry * 0x80)) mode
-  where carryBit = getCarry >>= return . boolToBit
+    carryBit <- boolToBit <$> getCarry
+    setModeVal ((val `shiftR` 1) + (carryBit * 0x80)) mode
+    setCarry (val .&. 0x1 == 0x1)
+    setZero ((val <= 1) && carryBit == 0)
+    setNeg (carryBit == 0x1)
 
 -- Unconditional Jump to Immediate 16 bit address
 jmpWordIns :: CPUState()
@@ -239,6 +319,20 @@ jmpCond b = if b then goToOffset else return ()
         let im' = (fromIntegral im :: Word16)
         setPC $ pc + (im' .&. 127) - (im' .&. 128)
 
+-- Break instruction, store PC and status register on stack
+-- set IRQ disable, and set PC to interrupt vector at 0xFFFE
+brkIns :: CPUState()
+brkIns = do
+    pc <- getPC
+    push (fromIntegral $ pc .&. 0xFF)
+    push (fromIntegral $ pc `shiftR` 8)
+    status <- getS
+    push status
+    setIRQ True
+    lowPC <- getMem 0xFFFE
+    highPC <- getMem 0xFFFF
+    setPC $ concatBytesLe lowPC highPC
+
 -- Clear carry flag
 clearCarryIns :: CPUState () 
 clearCarryIns = setS =<< ((0xFF - 0x1) .&.) <$> getS
@@ -281,6 +375,8 @@ laxIns mode = do
     val <- obtainModeVal mode
     setX val
     setA val
+    checkNegFlag val
+    checkZeroFlag val
     
 
 -- Value at address multiplied by 2,  A = A OR value at address, Illegal opcode instruction
@@ -325,10 +421,11 @@ iscIns mode = do
     incIns mode
     
 -- Value at address anded with A, carry flag set to 7th bit of result
--- TODO set carry flag
 ancIns :: AddressingMode -> CPUState ()
 ancIns mode = do
     andIns mode
+    a <- getA
+    setCarry (a >= 0x80)
 
 -- AND value at address with A, then shift right A
 alrIns :: AddressingMode -> CPUState ()
@@ -346,15 +443,29 @@ arrIns :: AddressingMode -> CPUState ()
 arrIns mode = do
     andIns mode
     rotateRReg A 
+    a <- getA
+    let bit5 = (a .&. 0x20) `shiftR` 5
+    let bit6 = (a .&. 0x40) `shiftR` 6
+    setOverflow (bit5 `xor` bit6 /= 0)
+    setCarry (bit6 /= 0)
 
 -- set X to : (X AND A) - nn
 -- Illegal opcode instruction
 axsIns :: AddressingMode -> CPUState ()
-axsIns mode = setX =<< (-) <$> ((.&.) <$> getX <*> getA) <*> getIm
+axsIns mode = do
+    x <- getX
+    a <- getA
+    nn <- getIm 
+    let val = (x .&. a) - nn 
+    setX val
+    checkZeroFlag val
+    checkNegFlag val
+    setCarry (x .&. a >= nn)
+    
 
--- Set A to A - imm, Illegal opcode instruction
+-- Same as sbc
 sbcIllegalIns :: AddressingMode -> CPUState ()
-sbcIllegalIns mode = setA =<< (-) <$> getA <*> getIm
+sbcIllegalIns mode = sbcIns mode
 
 -- Set A,X,SP to [nnnn + Y] AND SP, Illegal opcode instruction
 lasIns :: AddressingMode -> CPUState ()
@@ -365,13 +476,19 @@ lasIns mode = do
     setA res
     setX res
     setSP res
+    checkNegFlag res
+    checkZeroFlag res
 
 -- A = X and Immediate Value
+-- UNSTABLE illegal opcode instruction
 xaaIns ::CPUState ()
 xaaIns = do 
     im <- getIm
     x <- getX
-    setA (x .&. im)
+    let res = x .&. im
+    setA res
+    checkNegFlag res
+    checkZeroFlag res
     
 
 -- Value at address equal to A AND X AND (higher byte of PC + 1)

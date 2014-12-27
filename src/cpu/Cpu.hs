@@ -21,14 +21,15 @@ module Cpu (
     getMem, setMem,
     getCarry, getNeg, getZero, getOverflow,
     setFlag,
-    setCarry, setNeg, setZero, setOverflow,
+    setCarry, setNeg, setZero, setOverflow, setIRQ,
     checkNegFlag, checkZeroFlag,
-    concatBytesLe, add3, boolToBit
+    concatBytesLe, add3, boolToBit, isNeg
     ) where
 
 
 import Data.Word
 import Data.Bits
+import Data.Int
 import Control.Monad.State.Lazy
 import qualified Data.Vector.Unboxed as VU
 import Control.Applicative hiding ((<|>), many, optional, empty)
@@ -252,6 +253,9 @@ setZero = setFlag 0x2
 setOverflow :: Bool -> CPUState ()
 setOverflow = setFlag 0x40
 
+setIRQ :: Bool -> CPUState ()
+setIRQ = setFlag 0x4
+
 -- Flag Checking Helper Functions --
 
 checkNegFlag :: Word8 -> CPUState ()
@@ -259,6 +263,7 @@ checkNegFlag w8 = setNeg (w8 > 127)
 
 checkZeroFlag :: Word8 -> CPUState ()
 checkZeroFlag w8 = setZero (w8 == 0)
+
 
 boolToBit :: Bool -> Word8
 boolToBit b = if b then 1 else 0
@@ -270,4 +275,10 @@ concatBytesLe b1 b2 = (fromIntegral b1) .|. (shiftL (fromIntegral b2) 8)
 
 add3 :: Word8 -> Word8 -> Word8 -> Word8
 add3 a b c = a + b + c
+
+isNeg :: Word8 -> Bool
+isNeg = (>) 127
+
+toSigned :: Word8 -> Int8
+toSigned w8 = (fromIntegral (w8 .&. 127)) - (fromIntegral (w8 .&. 128))
 
