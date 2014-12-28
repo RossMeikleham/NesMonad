@@ -1,6 +1,6 @@
 -- Dissasembler --
 
-module Disasm (logIns) where
+module Debugger (logIns) where
 
 import Instructions (opcodeSizes)
 import Cpu
@@ -10,6 +10,7 @@ import Data.Bits
 import Control.Monad.State.Strict
 import Control.Applicative hiding ((<|>), many, optional, empty)
 import Text.Printf
+import System.IO.Unsafe
 
 data Instruction = 
       OneWord   String 
@@ -18,6 +19,7 @@ data Instruction =
     
 data InsType  = 
     None | Imm | ZPage | ZPX | ZPY | Abs | AbsX | AbsY | IndX | IndY | JmpRel | JmpImm | JmpAbs
+    | Acc
 
 instructionTable = [
  "BRK","ORA","KIL","*SLO","*NOP","ORA","ASL","*SLO","PHP","ORA","ASL","ANC","*NOP","ORA","ASL","*SLO",
@@ -40,13 +42,13 @@ instructionTable = [
 
 
 typeTable = [
- None, IndX, None, IndX, ZPage, ZPage, ZPage, ZPage, None, Imm, None, Imm, Abs, Abs, Abs, Abs,
+ None, IndX, None, IndX, ZPage, ZPage, ZPage, ZPage, None, Imm, Acc, Imm, Abs, Abs, Abs, Abs,
  JmpRel, IndY, None, IndY, ZPX, ZPX, ZPX, ZPX, None, AbsY, None, AbsY, AbsX, AbsX, AbsX, AbsX,
- JmpImm, IndX, None, IndX, ZPage, ZPage, ZPage, ZPage, None, Imm, None, Imm, Abs, Abs, Abs, Abs,
+ JmpImm, IndX, None, IndX, ZPage, ZPage, ZPage, ZPage, None, Imm, Acc, Imm, Abs, Abs, Abs, Abs,
  JmpRel, IndY, None, IndY, ZPX, ZPX, ZPX, ZPX, None, AbsY, None, AbsY, AbsX, AbsX, AbsX, AbsX,
- None, IndX, None, IndX, ZPage, ZPage, ZPage, ZPage, None, Imm, None, Imm, JmpImm, Abs, Abs, Abs,
+ None, IndX, None, IndX, ZPage, ZPage, ZPage, ZPage, None, Imm, Acc, Imm, JmpImm, Abs, Abs, Abs,
  JmpRel, IndY, None, IndY, ZPX, ZPX, ZPX, ZPX, None, AbsY, None, AbsY, AbsX, AbsX, AbsX, AbsX,
- None, IndX, None, IndX, ZPage, ZPage, ZPage, ZPage, None, Imm, None, Imm, JmpAbs, Abs, Abs, Abs,
+ None, IndX, None, IndX, ZPage, ZPage, ZPage, ZPage, None, Imm, Acc, Imm, JmpAbs, Abs, Abs, Abs,
  JmpRel, IndY, None, IndY, ZPX, ZPX, ZPX, ZPX, None, AbsY, None, AbsY, AbsX, AbsX, AbsX, AbsX,
  Imm, IndX, Imm, IndX, ZPage, ZPage, ZPage, ZPage, None, Imm, None, Imm, Abs, Abs, Abs, Abs,
  JmpRel, IndY, None, IndY, ZPX, ZPX, ZPY, ZPY, None, AbsY, None, AbsY, AbsX, AbsX, AbsY, AbsY,
@@ -92,6 +94,7 @@ logIns = evalState logIns'
         (flip (++)) <$> logRegs <*>
           case insType of
             None -> return $ printf "%04X  %02X       %4s %28s" pc opcode insName ""
+            Acc ->  return $ printf "%04X  %02X       %4s A %26s" pc opcode insName "" 
             Imm ->  return $ printf "%04X  %02X %02X    %4s #$%02X %23s" pc opcode operand1 
                                     insName operand1 ""
             ZPage -> do 
@@ -101,51 +104,52 @@ logIns = evalState logIns'
                             insName operand1 val "" 
             ZPX -> do 
                      x <- getX
-                     val <- obtainModeVal $ ZeroPage X
-                     return $ printf "%04X  %02X %02X  %4s $%02X, X @ %02X = %02X %10s" 
+                     val <- getMem $ fromIntegral (x + operand1)
+                     return $ printf "%04X  %02X %02X    %4s $%02X,X @ %02X = %02X %12s" 
                             pc opcode operand1
                             insName operand1 (operand1 + x) val ""   
             ZPY -> do
-                    y <- getY
-                    val <- obtainModeVal $ ZeroPage Y
-                    return $ printf "%04X  %02X %02X  %4s $%02X, Y @ %02X = %02X %10s" 
+                     y <- getY
+                     val <- getMem $ fromIntegral (y + operand1)
+                     return $ printf "%04X  %02X %02X    %4s $%02X,Y @ %02X = %02X %12s" 
                             pc opcode operand1
                             insName operand1 (operand1 + y) val ""   
             Abs -> do
-                    val <- obtainModeVal AbsoluteNoReg
-                    return $ printf "%04X  %02X %02X %02X  %4s $%4X = %02X %10s" 
+                    let addr = concatBytesLe operand1 operand2
+                    val <- getMem addr
+                    return $ printf "%04X  %02X %02X %02X %4s $%04X = %02X %17s" 
                             pc opcode operand1
-                            operand2 insName (concatBytesLe operand1 operand2) val "" 
+                            operand2 insName addr val "" 
             AbsX -> do
-                    val <- obtainModeVal $ Absolute X
                     x <- getX
                     let mem = concatBytesLe operand1 operand2
-                    return $ printf "%04X  %02X %02X %02X  %4s $%4X,X @ %4X = %02X %10s" 
+                    val <- getMem (mem + (fromIntegral x))
+                    return $ printf "%04X  %02X %02X %02X %4s $%04X,X @ %04X = %02X %8s" 
                             pc opcode operand1
                             operand2 insName (concatBytesLe operand1 operand2) 
                             (mem + (fromIntegral x)) val ""
 
             AbsY -> do
-                    val <- obtainModeVal $ Absolute Y
                     y <- getY
                     let mem = concatBytesLe operand1 operand2
-                    return $ printf "%04X  %02X %02X %02X  %4s $%4X,Y @ %4X = %02X %10s" 
+                    val <- getMem (mem + (fromIntegral y))
+                    return $ printf "%04X  %02X %02X %02X %4s $%04X,Y @ %04X = %02X %8s" 
                             pc opcode operand1
                             operand2 insName (concatBytesLe operand1 operand2) 
                             (mem + (fromIntegral y)) val ""
             IndX -> do
-                    val <- obtainModeVal $ IndirectX
                     x <- getX
                     addr <- concatBytesLe <$> (getMem $ fromIntegral (operand1 + x)) 
                                           <*> (getMem $ fromIntegral (operand1 + x + 1)) 
-                    return $ printf "%04X  %02X %02X   %4s ($%02X,X) @ %02X = %04X = %02X   " 
+                    val <- getMem addr
+                    return $ printf "%04X  %02X %02X    %4s ($%02X,X) @ %02X = %04X = %02X    " 
                             pc opcode operand1 insName operand1 (operand1 + x) addr val
             IndY -> do
-                    val <- obtainModeVal $ IndirectY
                     y <- getY
                     addr <- concatBytesLe <$> (getMem $ fromIntegral operand1)
                                           <*> (getMem $ fromIntegral (operand1 + 1))
-                    return $ printf "%04X  %02X %02X   %4s ($%02X),Y = %04X @ %04X = %02X  "
+                    val <- getMem (addr + (fromIntegral y))
+                    return $ printf "%04X  %02X %02X    %4s ($%02X),Y = %04X @ %04X = %02X  "
                             pc opcode operand1 insName operand1 addr 
                             (addr + (fromIntegral y)) val                    
 
@@ -162,11 +166,9 @@ logIns = evalState logIns'
                              operand2 insName addr ""
 
             JmpAbs -> do 
-                addr <- getImm 
-                val  <- if addr .&. 0xFF /= 0xFF -- Check if page boundary crossed
-                            then concatBytesLe <$> getMem addr <*> getMem (addr + 1)
-                            else concatBytesLe <$> getMem addr <*> getMem (addr - 0xFF) 
-                return $ printf "%04X  %02X %02X %02X %4s ($%04X) = %04X         " 
+                let addr = concatBytesLe operand1 operand2 
+                val  <- concatBytesLe <$> getMem addr <*> getMem (addr + 1)
+                unsafePerformIO (print $ ((printf "%4X\n" addr) :: String)) `seq` return $ printf "%04X  %02X %02X %02X %4s ($%04X) = %04X              " 
                          pc opcode operand1
                          operand2 insName addr val
 

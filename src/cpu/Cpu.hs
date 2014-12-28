@@ -84,7 +84,8 @@ loadMemory :: [Word8] -> Word16 -> CPU -> CPU
 loadMemory rom startAddr cpu = execState loadMemory' cpu
   where loadMemory' :: CPUState ()
         loadMemory' = do
-            mapM_ (\(val, offset) -> setMem val (startAddr + offset)) (zip rom [0,1..])
+            mapM_ (\(val, offset) -> setMem val (startAddr + offset)) 
+                        (zip rom [0,1..0xFFFF - startAddr])
       
 getReg :: Reg -> CPUState Word8
 getReg A = getA

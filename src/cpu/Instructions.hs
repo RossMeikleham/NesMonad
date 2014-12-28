@@ -53,7 +53,7 @@ moveRegIns :: Reg -> Reg -> CPUState ()
 moveRegIns r1 r2 = do --r1 := r2
     val <- getReg r2
     setReg r1 val 
-    if r1 /= S then do
+    if r1 /= SP then do
         checkNegFlag val
         checkZeroFlag val
     else
@@ -73,18 +73,21 @@ storeIns reg mode = (\v -> setModeVal v mode) =<< getReg reg
 
 -- | Push value from Register into Stack
 pushIns ::Reg -> CPUState()
-pushIns r  = push =<< getReg r
+pushIns r  = do
+    reg <- getReg r
+    push $ if r == S then reg .|. 0x10 else reg -- Set bit 4 when pushing status reg
 
 -- | Pop value from Stack into Register
 popIns :: Reg -> CPUState()
 popIns r = do
     val <- pop 
-    setReg r val
     if r == A then do
         checkNegFlag val
         checkZeroFlag val
-    else 
-        return ()
+        setReg r val
+    else if r == S then 
+        setReg r $ val `clearBit` 4 `setBit` 5
+    else setReg r val
     
 
 -- | ALU Instructions
@@ -101,7 +104,7 @@ adcIns mode = do
     checkZeroFlag sum
     setCarry (0xFF - a < n || sum == 0) -- Check sum <= 255
     checkNegFlag sum 
-    setOverflow (((a `xor` n) .&. (a `xor` sum) .&. 0x80) /= 0) -- Check bit 7 stays the same
+    setOverflow (((n `xor` sum) .&. (a `xor` sum) .&. 0x80) /= 0) -- Check bit 7 stays the same
 
 
 -- Subtract with Carry value from Accumulator
@@ -116,16 +119,15 @@ sbcIns mode = do
   checkZeroFlag sum
   checkNegFlag sum
   setCarry (a > n || (a == n && carryBit == 1)) 
-  setOverflow (((n `xor` sum) .&. (a `xor` sum) .&. 0x80) /= 0)
-
+  setOverflow ((a `xor` sum) .&. (a `xor` n) .&. 0x80 /= 0)
 
 -- AND Accumulator with value
 andIns :: AddressingMode -> CPUState()
 andIns mode = do
     val <- (.&.) <$> getA <*> obtainModeVal mode 
     setA val
-    setZero (val == 0) 
-    setNeg  (isNeg val) 
+    checkZeroFlag val 
+    checkNegFlag val 
     
 
 -- XOR Accumulator with value
@@ -133,8 +135,8 @@ xorIns :: AddressingMode -> CPUState()
 xorIns mode = do
     val <- xor <$> getA <*> obtainModeVal mode
     setA val
-    setZero (val == 0)
-    setNeg (isNeg val)
+    checkZeroFlag val
+    checkNegFlag val
 
 
 -- Or Accumulator with value
@@ -142,8 +144,8 @@ orIns :: AddressingMode -> CPUState()
 orIns mode = do
     val <- (.|.) <$> getA <*> obtainModeVal mode
     setA val
-    setZero (val == 0)
-    setNeg (isNeg val)
+    checkZeroFlag val
+    checkNegFlag val
 
 -- Compare register against value, and set appropriate flags
 compareIns :: Reg -> AddressingMode -> CPUState()
@@ -310,7 +312,7 @@ retIIns = do
     low <- pop
     high <- pop
     setPC $ concatBytesLe low high
-    setS p
+    setS (p `clearBit` 4 `setBit` 5)
 
 
 -- Return from Subroutine
@@ -402,11 +404,15 @@ setIntDisableIns = setS =<< (0x4 .|.) <$> getS
 
 -- Set Decimal mode
 setDecimalIns :: CPUState ()
-setDecimalIns = setS =<< (0x40 .|.) <$> getS 
+setDecimalIns = setS =<< (0x8 .|.) <$> getS 
 
 -- Do nothing nop
 nopIns ::CPUState ()
 nopIns = return ()
+
+-- TODO implement, should halg CPU
+killIns :: CPUState ()
+killIns = return ()
 
 -- Set value to A AND X, illegal opcode instruction
 saxIns :: AddressingMode -> CPUState() 
@@ -425,43 +431,43 @@ laxIns mode = do
 -- Value at address multiplied by 2,  A = A OR value at address, Illegal opcode instruction
 sloIns :: AddressingMode -> CPUState() 
 sloIns mode = do
-    orIns mode
     shiftLIns mode
+    orIns mode
 
 -- Value at address rotated left, A = A AND value are address, Illegal
 -- opcode instruction
 rlaIns :: AddressingMode -> CPUState()
 rlaIns mode = do
-    andIns mode
     rotateLIns mode
+    andIns mode
 
 -- Value at address shifted right, A = A XOR value at address, Illegal
 -- opcode instruction
 sreIns :: AddressingMode -> CPUState ()
 sreIns mode = do
-    xorIns mode
     shiftRIns mode
+    xorIns mode
 
 -- Value at address rotated right , A = A + value at address + carry bit,
 -- Illegal opcode instruction
 rraIns :: AddressingMode -> CPUState ()
 rraIns mode = do
-    adcIns mode
     rotateRIns mode
+    adcIns mode
 
 -- Value at address decremented, compare A with value at address 
 -- Illegal opcode instruction
 dcpIns :: AddressingMode -> CPUState ()
 dcpIns mode = do
-    compareIns A mode
     decIns mode
+    compareIns A mode
 
 -- Value at address incremented, A = sbc A , value at address
 -- Illegal opcode instruction
 iscIns :: AddressingMode -> CPUState ()
 iscIns mode = do
-    sbcIns mode
     incIns mode
+    sbcIns mode
     
 -- Value at address anded with A, carry flag set to 7th bit of result
 ancIns :: AddressingMode -> CPUState ()
@@ -591,10 +597,10 @@ executeOpCode op
     
     | op == 0xA8 = moveRegIns Y A
     | op == 0xAA = moveRegIns X A
-    | op == 0xBA = moveRegIns X S
+    | op == 0xBA = moveRegIns X SP
     | op == 0x98 = moveRegIns A Y
     | op == 0x8A = moveRegIns A X
-    | op == 0x9A = moveRegIns S X
+    | op == 0x9A = moveRegIns SP X
 
     | op == 0xA9 = loadIns A Immediate
     | op == 0xA2 = loadIns X Immediate
@@ -616,9 +622,9 @@ executeOpCode op
     | op == 0xBE = loadIns X (Absolute Y)
     
     | op == 0xA4 = loadIns Y ZeroPageNoReg 
-    | op == 0xB4 = loadIns Y (ZeroPage Y)
+    | op == 0xB4 = loadIns Y (ZeroPage X)
     | op == 0xAC = loadIns Y AbsoluteNoReg
-    | op == 0xBC = loadIns Y (Absolute Y)
+    | op == 0xBC = loadIns Y (Absolute X)
     
     -- Store Register into Memory
 
@@ -720,7 +726,7 @@ executeOpCode op
     | op == 0xD6 = decIns (ZeroPage X)
     | op == 0xCE = decIns AbsoluteNoReg
     | op == 0xDE = decIns (Absolute X)
-    | op == 0xC8 = decReg X
+    | op == 0xCA = decReg X
     | op == 0x88 = decReg Y
     
     -- Rotate/Shift instructions
@@ -763,7 +769,7 @@ executeOpCode op
     | op == 0x90 = jmpNoCarryIns
     | op == 0xB0 = jmpCarryIns
     | op == 0xD0 = jmpNotZeroIns
-    | op == 0xF0 = jmpCarryIns
+    | op == 0xF0 = jmpZeroIns
 
     -- Control instructions
 
@@ -842,6 +848,58 @@ executeOpCode op
     | op == 0x2B = ancIns Immediate
     | op == 0x4B = alrIns Immediate
     | op == 0x6B = arrIns Immediate
+
+    | op == 0x1A = nopIns
+    | op == 0x3A = nopIns
+    | op == 0x5A = nopIns
+    | op == 0x7A = nopIns
+    | op == 0xDA = nopIns 
+    | op == 0xFA = nopIns
+
+    -- Nop with immediate, TODO properly implement
+    | op == 0x80 = nopIns
+    | op == 0x82 = nopIns
+    | op == 0x89 = nopIns
+    | op == 0xC2 = nopIns
+    | op == 0xE2 = nopIns
+
+    -- Nop with immediate zero page memory read, TODO properly implement
+    | op == 0x04 = nopIns
+    | op == 0x44 = nopIns
+    | op == 0x64 = nopIns 
+
+    -- Nop with ZeroPage + X memory read, TODO properly implement
+    | op == 0x14 = nopIns
+    | op == 0x34 = nopIns
+    | op == 0x54 = nopIns
+    | op == 0x74 = nopIns
+    | op == 0xD4 = nopIns
+    | op == 0xF4 = nopIns
+
+    -- Nop with Abs memory read, TODO properly implement
+    | op == 0x0C = nopIns
+    
+    -- Nop with abs + x memory read, TODO properly implement
+    | op == 0x1C = nopIns
+    | op == 0x3C = nopIns
+    | op == 0x5C = nopIns
+    | op == 0x7C = nopIns
+    | op == 0xDC = nopIns
+    | op == 0xFC = nopIns
+
+    -- Kill
+    | op == 0x02 = killIns 
+    | op == 0x12 = killIns 
+    | op == 0x22 = killIns 
+    | op == 0x32 = killIns 
+    | op == 0x42 = killIns 
+    | op == 0x52 = killIns 
+    | op == 0x62 = killIns 
+    | op == 0x72 = killIns 
+    | op == 0x92 = killIns 
+    | op == 0xB2 = killIns 
+    | op == 0xD2 = killIns 
+    | op == 0xF2 = killIns 
 
     -- HIGHLY UNSTABLE instructions
     | op == 0x8B = xaaIns 
