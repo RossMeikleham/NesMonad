@@ -1,7 +1,8 @@
 -- Atari 2600 6507 CPU --
 module Cpu (
-    CPU,
-    Registers,
+    CPU(..),
+    createCPU, loadMemory,
+    Registers(..),
     Memory,
     CPUState,
     AddressingMode(..),
@@ -30,13 +31,16 @@ module Cpu (
 import Data.Word
 import Data.Bits
 import Data.Int
-import Control.Monad.State.Lazy
+import Control.Monad.State.Strict
 import qualified Data.Vector.Unboxed as VU
 import Control.Applicative hiding ((<|>), many, optional, empty)
+import System.IO.Unsafe
+import Text.Printf
 
 data CPU = CPU {
     registers :: Registers,
-    memory :: Memory
+    memory :: Memory,
+    cycles :: Integer
 }
 
 data Registers = Registers {
@@ -64,11 +68,24 @@ type CPUState a = State CPU a
 
 data AddressingMode = 
     Immediate | ZeroPageNoReg | ZeroPage Reg | AbsoluteNoReg |
-    Absolute Reg | IndirectX | IndirectY
+    Absolute Reg | IndirectX | IndirectY 
 
 data Reg = A | B | X | Y | S | SP deriving (Eq)
 
+createCPU :: Word16 -> CPU
+createCPU startAddr = cpu 
+  where cycles = 0
+        regs = Registers 0 0 0 0x24 0xFD startAddr
+        mem = Memory $ VU.replicate 0x10000 0x0
+        cpu = CPU regs mem cycles
 
+-- Load ROM into memory starting at given address
+loadMemory :: [Word8] -> Word16 -> CPU -> CPU
+loadMemory rom startAddr cpu = execState loadMemory' cpu
+  where loadMemory' :: CPUState ()
+        loadMemory' = do
+            mapM_ (\(val, offset) -> setMem val (startAddr + offset)) (zip rom [0,1..])
+      
 getReg :: Reg -> CPUState Word8
 getReg A = getA
 getReg X = getX
@@ -136,6 +153,12 @@ pop = do
     setSP (addr + 1)
     return val 
 
+incCycles :: Integer -> CPUState ()
+incCycles i = do
+    cpu <- get
+    let newCycles = i + (cycles cpu)
+    put $ cpu {cycles = newCycles}
+
 -- Get/Set all Registers from CPU
 getRegs :: CPUState Registers
 getRegs = get >>= return . registers
@@ -185,23 +208,23 @@ getPC = getRegs >>= return . pc
 getIm :: CPUState Word8
 getIm = do
     pc <- getPC
-    getMem (pc + 1)
+    getMem (pc - 1)
     
 setIm :: Word8 -> CPUState ()
 setIm w8 = do
     pc <- getPC
-    setMem w8 (pc + 1) 
+    setMem w8 (pc - 1) 
     
 getImm :: CPUState Word16
 getImm = do
     pc <- getPC
-    concatBytesLe <$> getMem (pc + 1) <*> getMem (pc + 2)
+    concatBytesLe <$> getMem (pc - 2) <*> getMem (pc - 1)
 
 setImm :: Word16 -> CPUState ()
 setImm w16 = do
     pc <- getPC
-    setMem (fromIntegral (w16 .&. 0x7F)) (pc + 1)
-    setMem (fromIntegral (w16 `shiftR` 8)) (pc + 2)
+    setMem (fromIntegral (w16 .&. 0x7F)) (pc - 2)
+    setMem (fromIntegral (w16 `shiftR` 8)) (pc - 1)
 
 getAllMem :: CPUState Memory
 getAllMem = get >>= return . memory
@@ -239,7 +262,7 @@ setFlag :: Word8 -> Bool -> CPUState ()
 setFlag bits state = do
     s <- getS
     setS $ op s
-  where op = if state then (.&. (0xFF - bits)) else (.|. bits)
+  where op = if state then (.|. bits) else (.&. (0xFF - bits)) 
 
 setCarry :: Bool -> CPUState ()
 setCarry = setFlag 0x1 
