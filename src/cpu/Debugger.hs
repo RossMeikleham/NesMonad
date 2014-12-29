@@ -10,7 +10,6 @@ import Data.Bits
 import Control.Monad.State.Strict
 import Control.Applicative hiding ((<|>), many, optional, empty)
 import Text.Printf
-import System.IO.Unsafe
 
 data Instruction = 
       OneWord   String 
@@ -166,11 +165,11 @@ logIns = evalState logIns'
                              operand2 insName addr ""
 
             JmpAbs -> do 
-                let addr = concatBytesLe operand1 operand2 
-                val  <- concatBytesLe <$> getMem addr <*> getMem (addr + 1)
-                unsafePerformIO (print $ ((printf "%4X\n" addr) :: String)) `seq` return $ printf "%04X  %02X %02X %02X %4s ($%04X) = %04X              " 
-                         pc opcode operand1
-                         operand2 insName addr val
+                    let addr = concatBytesLe operand1 operand2 
+                    val  <- concatBytesLe <$> getMem addr <*> getMem (addr + 1)
+                    return $ printf "%04X  %02X %02X %02X %4s ($%04X) = %04X              " 
+                             pc opcode operand1
+                             operand2 insName addr val
 
     logRegs = do
         a <- getA
