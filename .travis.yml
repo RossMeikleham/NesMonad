@@ -3,7 +3,9 @@ language: haskell
 env:
  - GHCVER=7.8.3
  
-script:
- - cabal configure --enable-tests && cabal build
- - cabal test --log=/dev/stdout
+before_install:
+ - cabal install hpc-coveralls
 
+script:
+ - cabal configure --enable-tests --enable-library-coverage && cabal build
+ - run-cabal-test 
