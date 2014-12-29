@@ -61,7 +61,7 @@ moveRegIns r1 r2 = do --r1 := r2
 -- |Load Instruction (Mem to Reg)
 loadIns :: Reg -> AddressingMode -> CPUState()
 loadIns reg mode = do 
-    val <- obtainModeVal mode
+    val <- obtainModeVal mode True
     setReg reg val
     checkNegFlag val
     checkZeroFlag val
@@ -93,12 +93,14 @@ popIns r = do
 -- | ALU Instructions
 
 -- Add with carry value from Accumulator
--- TODO implement BCD and double check overflow calculation is correct
 adcIns :: AddressingMode -> CPUState ()
-adcIns mode = do
+adcIns mode = adcIns' mode True
+
+adcIns' :: AddressingMode -> Bool -> CPUState()
+adcIns' mode boundCheck = do
     carryBit <- boolToBit <$> getCarry
     a <- getA
-    n <- obtainModeVal mode
+    n <- obtainModeVal mode boundCheck
     let sum = carryBit + a + n
     setA sum
     checkZeroFlag sum
@@ -106,25 +108,31 @@ adcIns mode = do
     checkNegFlag sum 
     setOverflow (((n `xor` sum) .&. (a `xor` sum) .&. 0x80) /= 0) -- Check bit 7 stays the same
 
-
 -- Subtract with Carry value from Accumulator
--- TODO implement BCD and double check overflow calculation is correct
 sbcIns :: AddressingMode -> CPUState()
-sbcIns mode = do
+sbcIns mode = sbcIns' mode True
+
+
+sbcIns' :: AddressingMode -> Bool -> CPUState()
+sbcIns' mode boundCheck = do
   carryBit <- boolToBit <$> getCarry
   a <- getA
-  n <- obtainModeVal mode
+  n <- obtainModeVal mode boundCheck
   let sum = (a - n - 1) + carryBit 
   setA sum
   checkZeroFlag sum
   checkNegFlag sum
   setCarry (a > n || (a == n && carryBit == 1)) 
   setOverflow ((a `xor` sum) .&. (a `xor` n) .&. 0x80 /= 0)
+    
 
 -- AND Accumulator with value
 andIns :: AddressingMode -> CPUState()
-andIns mode = do
-    val <- (.&.) <$> getA <*> obtainModeVal mode 
+andIns mode = andIns' mode True 
+    
+andIns' :: AddressingMode -> Bool -> CPUState()
+andIns' mode boundCheck = do
+    val <- (.&.) <$> getA <*> obtainModeVal mode boundCheck
     setA val
     checkZeroFlag val 
     checkNegFlag val 
@@ -132,8 +140,11 @@ andIns mode = do
 
 -- XOR Accumulator with value
 xorIns :: AddressingMode -> CPUState()
-xorIns mode = do
-    val <- xor <$> getA <*> obtainModeVal mode
+xorIns mode = xorIns' mode True
+
+xorIns' :: AddressingMode -> Bool -> CPUState()
+xorIns' mode boundCheck = do
+    val <- xor <$> getA <*> obtainModeVal mode boundCheck
     setA val
     checkZeroFlag val
     checkNegFlag val
@@ -141,33 +152,39 @@ xorIns mode = do
 
 -- Or Accumulator with value
 orIns :: AddressingMode -> CPUState()
-orIns mode = do
-    val <- (.|.) <$> getA <*> obtainModeVal mode
+orIns mode = orIns' mode True
+
+orIns' :: AddressingMode -> Bool -> CPUState()
+orIns' mode boundCheck  = do
+    val <- (.|.) <$> getA <*> obtainModeVal mode boundCheck
     setA val
     checkZeroFlag val
     checkNegFlag val
+    
 
 -- Compare register against value, and set appropriate flags
 compareIns :: Reg -> AddressingMode -> CPUState()
-compareIns reg mode = do
-    val <- obtainModeVal mode
+compareIns reg mode = compareIns' reg mode True
+
+compareIns' :: Reg -> AddressingMode -> Bool -> CPUState()
+compareIns' reg mode boundCheck = do
+    val <- obtainModeVal mode boundCheck
     r <- getReg reg
     setCarry (r >= val)
     setZero  (r == val)
     setNeg   (((r - val) .&. 0x80) == 0x80)
 
 
-
 bitTestIns :: AddressingMode -> CPUState()
 bitTestIns mode = do
-    val <- obtainModeVal mode
+    val <- obtainModeVal mode False
     a <- getA
     checkZeroFlag (a .&. val)
     setOverflow (val .&. 0x40 == 0x40)
     setNeg (val .&. 0x80 == 0x80)
 
 
--- Incrememnt value in register by 1
+-- Increment value in register by 1
 incReg :: Reg -> CPUState()
 incReg reg = do 
     res <- (+) <$> (getReg reg) <*> (pure 1)
@@ -178,7 +195,7 @@ incReg reg = do
 -- Increment value by 1
 incIns :: AddressingMode -> CPUState()
 incIns mode = do 
-    val <- obtainModeVal mode
+    val <- obtainModeVal mode False
     let res = val + 1
     setModeVal res mode
     checkZeroFlag res
@@ -196,7 +213,7 @@ decReg reg = do
 -- Decrement value by 1
 decIns :: AddressingMode -> CPUState()
 decIns mode = do
-    val <- obtainModeVal mode
+    val <- obtainModeVal mode False
     let res = val - 1
     setModeVal res mode
     checkZeroFlag res
@@ -215,7 +232,7 @@ shiftLReg reg = do
 -- Shift left
 shiftLIns :: AddressingMode -> CPUState()
 shiftLIns mode = do
-    val <- obtainModeVal mode
+    val <- obtainModeVal mode False
     setModeVal (val `shiftL` 1) mode
     setCarry (val .&. 0x80 == 0x80)
     setNeg (val .&. 0x40 == 0x40)
@@ -234,7 +251,7 @@ shiftRReg reg = do
 -- Shift right 
 shiftRIns :: AddressingMode -> CPUState()
 shiftRIns mode = do 
-    val <- obtainModeVal mode
+    val <- obtainModeVal mode False
     setModeVal (val `shiftR` 1) mode
     setCarry (val .&. 0x1 == 0x1)
     setZero (val <= 0x1)
@@ -254,7 +271,7 @@ rotateLReg reg = do
 -- Rotate Left through carry bit
 rotateLIns :: AddressingMode -> CPUState()
 rotateLIns mode = do
-    val <- obtainModeVal mode
+    val <- obtainModeVal mode False
     carryBit <- boolToBit <$> getCarry
     setModeVal ((val `shiftL` 1) + carryBit) mode
     setCarry (val .&. 0x80 == 0x80)
@@ -275,7 +292,7 @@ rotateRReg reg = do
 -- Rotate Right through carry bit
 rotateRIns :: AddressingMode -> CPUState()
 rotateRIns mode = do
-    val <- obtainModeVal mode
+    val <- obtainModeVal mode False
     carryBit <- boolToBit <$> getCarry
     setModeVal ((val `shiftR` 1) + (carryBit * 0x80)) mode
     setCarry (val .&. 0x1 == 0x1)
@@ -356,13 +373,17 @@ jmpOverflowIns = jmpCond =<< getOverflow
 
 -- Branch if condition met, to signed 8 bit offset
 jmpCond :: Bool -> CPUState()
-jmpCond b = if b then goToOffset else return ()
-  where 
-    goToOffset = do 
+jmpCond b = when b (do 
         im <- getIm
         pc <- getPC
         let im' = (fromIntegral im :: Word16)
-        setPC $ pc + (im' .&. 127) - (im' .&. 128)
+            newPC = pc + (im' .&. 127) - (im' .&. 128)
+        setPC newPC
+        -- Branch has been taken, so need to add an extra cycle
+        if (newPC .&. 0xFF00) /= (pc .&. 0xFF00)
+            then modifyCycles (+2) -- Page boundary crosses, another extra cycle
+            else modifyCycles (+1)) 
+        
 
 -- Break instruction, store PC and status register on stack
 -- set IRQ disable, and set PC to interrupt vector at 0xFFFE
@@ -410,6 +431,12 @@ setDecimalIns = setS =<< (0x8 .|.) <$> getS
 nopIns ::CPUState ()
 nopIns = return ()
 
+nopIns' :: AddressingMode -> CPUState ()
+nopIns' mode = do
+  obtainModeVal mode True
+  return () 
+
+
 -- TODO implement, should halg CPU
 killIns :: CPUState ()
 killIns = return ()
@@ -421,7 +448,7 @@ saxIns mode = (flip setModeVal) mode =<< (.&.) <$> getA <*> getX
 -- Value is set to both A and X registers
 laxIns :: AddressingMode -> CPUState()
 laxIns mode = do
-    val <- obtainModeVal mode
+    val <- obtainModeVal mode True
     setX val
     setA val
     checkNegFlag val
@@ -432,42 +459,42 @@ laxIns mode = do
 sloIns :: AddressingMode -> CPUState() 
 sloIns mode = do
     shiftLIns mode
-    orIns mode
+    orIns' mode False
 
 -- Value at address rotated left, A = A AND value are address, Illegal
 -- opcode instruction
 rlaIns :: AddressingMode -> CPUState()
 rlaIns mode = do
     rotateLIns mode
-    andIns mode
+    andIns' mode False
 
 -- Value at address shifted right, A = A XOR value at address, Illegal
 -- opcode instruction
 sreIns :: AddressingMode -> CPUState ()
 sreIns mode = do
     shiftRIns mode
-    xorIns mode
+    xorIns' mode False
 
 -- Value at address rotated right , A = A + value at address + carry bit,
 -- Illegal opcode instruction
 rraIns :: AddressingMode -> CPUState ()
 rraIns mode = do
     rotateRIns mode
-    adcIns mode
+    adcIns' mode False
 
 -- Value at address decremented, compare A with value at address 
 -- Illegal opcode instruction
 dcpIns :: AddressingMode -> CPUState ()
 dcpIns mode = do
     decIns mode
-    compareIns A mode
+    compareIns' A mode False
 
 -- Value at address incremented, A = sbc A , value at address
 -- Illegal opcode instruction
 iscIns :: AddressingMode -> CPUState ()
 iscIns mode = do
     incIns mode
-    sbcIns mode
+    sbcIns' mode False
     
 -- Value at address anded with A, carry flag set to 7th bit of result
 ancIns :: AddressingMode -> CPUState ()
@@ -519,7 +546,7 @@ sbcIllegalIns mode = sbcIns mode
 -- Set A,X,SP to [nnnn + Y] AND SP, Illegal opcode instruction
 lasIns :: AddressingMode -> CPUState ()
 lasIns mode = do
-    val <- obtainModeVal mode
+    val <- obtainModeVal mode True
     sp <- getSP
     let res = val .&. sp
     setA res
@@ -577,6 +604,8 @@ tasIns mode = do
 
 haltIns :: CPUState ()
 haltIns = return () --TODO implement HALT
+
+
  
 
 stepInstruction :: CPU -> CPU
@@ -586,9 +615,10 @@ stepInstruction = execState stepInstruction'
             pc <- getPC
             opcode <- getMem pc
             let pcInc = opcodeSizes !! (fromIntegral opcode)
-            setPC (pc + pcInc)
-            pc' <- getPC
-            executeOpCode opcode 
+            setPC (pc + pcInc)            
+            executeOpCode opcode
+            modifyCycles (+ (baseOpcodeCycles !! (fromIntegral opcode)))  
+            
 
 
 executeOpCode :: Word8 -> CPUState ()
@@ -857,35 +887,35 @@ executeOpCode op
     | op == 0xFA = nopIns
 
     -- Nop with immediate, TODO properly implement
-    | op == 0x80 = nopIns
-    | op == 0x82 = nopIns
-    | op == 0x89 = nopIns
-    | op == 0xC2 = nopIns
-    | op == 0xE2 = nopIns
+    | op == 0x80 = nopIns' Immediate 
+    | op == 0x82 = nopIns' Immediate
+    | op == 0x89 = nopIns' Immediate
+    | op == 0xC2 = nopIns' Immediate
+    | op == 0xE2 = nopIns' Immediate
 
     -- Nop with immediate zero page memory read, TODO properly implement
-    | op == 0x04 = nopIns
-    | op == 0x44 = nopIns
-    | op == 0x64 = nopIns 
+    | op == 0x04 = nopIns' ZeroPageNoReg                                      
+    | op == 0x44 = nopIns' ZeroPageNoReg                                                             
+    | op == 0x64 = nopIns' ZeroPageNoReg                                                                  
 
     -- Nop with ZeroPage + X memory read, TODO properly implement
-    | op == 0x14 = nopIns
-    | op == 0x34 = nopIns
-    | op == 0x54 = nopIns
-    | op == 0x74 = nopIns
-    | op == 0xD4 = nopIns
-    | op == 0xF4 = nopIns
+    | op == 0x14 = nopIns' (ZeroPage X)
+    | op == 0x34 = nopIns' (ZeroPage X)
+    | op == 0x54 = nopIns' (ZeroPage X)
+    | op == 0x74 = nopIns' (ZeroPage X)
+    | op == 0xd4 = nopIns' (ZeroPage X)
+    | op == 0xF4 = nopIns' (ZeroPage X)
 
     -- Nop with Abs memory read, TODO properly implement
-    | op == 0x0C = nopIns
+    | op == 0x0C = nopIns' AbsoluteNoReg
     
     -- Nop with abs + x memory read, TODO properly implement
-    | op == 0x1C = nopIns
-    | op == 0x3C = nopIns
-    | op == 0x5C = nopIns
-    | op == 0x7C = nopIns
-    | op == 0xDC = nopIns
-    | op == 0xFC = nopIns
+    | op == 0x1C = nopIns' (Absolute X)
+    | op == 0x3C = nopIns' (Absolute X)
+    | op == 0x5C = nopIns' (Absolute X)
+    | op == 0x7C = nopIns' (Absolute X)
+    | op == 0xDC = nopIns' (Absolute X)
+    | op == 0xFC = nopIns' (Absolute X)
 
     -- Kill
     | op == 0x02 = killIns 

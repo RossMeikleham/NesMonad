@@ -12,8 +12,9 @@ module Cpu (
     setModeVal,
     push,
     pop,
-    setRegs,
-    getRegs,
+    setRegs, getRegs,
+    setCycles, getCycles, modifyCycles,
+    setScanLine, getScanLine, modifyScanLine,
     setA, setX, setY, setS, setSP, setPC,
     getA, getX, getY, getS, getSP, getPC,
     getIm, setIm,
@@ -40,7 +41,8 @@ import Text.Printf
 data CPU = CPU {
     registers :: Registers,
     memory :: Memory,
-    cycles :: Integer
+    cycles :: Integer,
+    scanLine :: Integer
 }
 
 data Registers = Registers {
@@ -77,7 +79,7 @@ createCPU startAddr = cpu
   where cycles = 0
         regs = Registers 0 0 0 0x24 0xFD startAddr
         mem = Memory $ VU.replicate 0x10000 0x0
-        cpu = CPU regs mem cycles
+        cpu = CPU regs mem cycles 241
 
 -- Load ROM into memory starting at given address
 loadMemory :: [Word8] -> Word16 -> CPU -> CPU
@@ -101,12 +103,36 @@ setReg Y = setY
 setReg S = setS
 setReg SP = setSP
 
-obtainModeVal mode = case mode of
+
+-- Check if memory access crosses page boundary e.g. 0x01FF 0x0200 are in different pages
+-- if so, add 1 to current cycle count
+checkPageBoundary :: Word16 -> Word16 -> CPUState ()
+checkPageBoundary w1 w2 = 
+    if (w1 .&. 0xFF00) /= (w2 .&. 0xFF00)
+        then modifyCycles (+1)
+    else
+        return()
+
+-- Obtain value in memoru for given addressing mode, 
+-- If boundary check is set then for Absolute X and Y, and Indirect Y check
+-- if page boundary crosses and increment the cycle count if it has
+obtainModeVal :: AddressingMode -> Bool -> CPUState Word8
+obtainModeVal mode checkBoundary = case mode of
     Immediate -> getIm
+
     ZeroPageNoReg -> getMem . fromIntegral =<< getIm
+
     ZeroPage reg -> getMem . fromIntegral =<< (+) <$> getIm <*> getReg reg
+
     AbsoluteNoReg -> getMem =<< getImm
-    Absolute reg -> getMem =<< (+) <$> getImm <*> (fromIntegral <$> (getReg reg))
+
+    Absolute reg -> do
+        r <- getReg reg
+        imm <- getImm 
+        let sum = imm + (fromIntegral r) 
+        when checkBoundary $ checkPageBoundary imm sum
+        getMem sum
+
     IndirectX -> do
         im <- getIm
         x <- getX 
@@ -118,8 +144,10 @@ obtainModeVal mode = case mode of
         im <- getIm
         addr1 <- getMem $ fromIntegral im
         addr2 <- getMem $ fromIntegral (im + 1)
-        y <- getY
-        getMem $ (concatBytesLe addr1 addr2)  + (fromIntegral y) 
+        let addr = concatBytesLe addr1 addr2
+        y <- fromIntegral `fmap` getY
+        when checkBoundary $ checkPageBoundary addr (addr + y)
+        getMem $ addr  + y
 
 setModeVal :: Word8 -> AddressingMode -> CPUState ()
 setModeVal w8 mode = case mode of
@@ -144,6 +172,7 @@ setModeVal w8 mode = case mode of
 push :: Word8 -> CPUState () -- [SP] = val, SP = SP - 1
 push w8 = do
     addr <- getSP
+    -- SP points to mem locations 0x100 to 0x1FF 
     setMem w8 $ 0x100 + (fromIntegral addr) 
     setSP (addr - 1)
 
@@ -154,18 +183,37 @@ pop = do
     setSP (addr + 1)
     return val 
 
-incCycles :: Integer -> CPUState ()
-incCycles i = do
-    cpu <- get
-    let newCycles = i + (cycles cpu)
-    put $ cpu {cycles = newCycles}
-
 -- Get/Set all Registers from CPU
 getRegs :: CPUState Registers
 getRegs = get >>= return . registers
 
 setRegs :: Registers -> CPUState ()
 setRegs regs = get >>= \cpu -> put $ cpu {registers = regs}
+
+-- Get/Set Cycles of CPU
+getCycles :: CPUState Integer
+getCycles = get >>= return . cycles
+
+setCycles :: Integer -> CPUState ()
+setCycles c = get >>= \cpu -> put $ cpu {cycles = c}
+
+
+modifyCycles :: (Integer -> Integer) -> CPUState () 
+modifyCycles f = do
+    cycles <- getCycles 
+    setCycles (f cycles)
+
+-- Get/Set current ScanLine
+getScanLine :: CPUState Integer
+getScanLine = get >>= return . scanLine
+
+setScanLine :: Integer -> CPUState ()
+setScanLine sl = get >>= \cpu -> put $ cpu {scanLine = sl}
+
+modifyScanLine :: (Integer -> Integer) -> CPUState ()
+modifyScanLine f = do
+    sl <- getScanLine
+    setScanLine (f sl)
 
 -- Set specific Registers
 setA :: Word8 -> CPUState ()

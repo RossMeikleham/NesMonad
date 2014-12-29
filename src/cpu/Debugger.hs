@@ -178,7 +178,11 @@ logIns = evalState logIns'
         y <- getY
         p <- getS
         sp <- getSP
-        return $ printf "A:%02X X:%02X Y:%02X P:%02X SP:%02X" a x y p sp
+        cycles <- getCycles
+        let ppuCycles = (cycles * 3) `mod` 341
+           -- sl = (cycles * 3) `div` 341 - 21
+        return $ printf "A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:%3d" 
+                 a x y p sp ppuCycles
     
 
 

@@ -51,7 +51,7 @@ logCPU :: Integer -> CPU -> IO ()
 logCPU i cpu 
     | i < 1 = return ()
     | otherwise = do
-        appendFile outFile $ logIns cpu ++ " \n" 
+        appendFile outFile $ logIns cpu ++ "\n" 
        -- printf "%X\n" $ pc $ registers $ cpu
         logCPU (i - 1) (stepInstruction cpu)
 
