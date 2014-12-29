@@ -1,7 +1,9 @@
 -- Unit tests for Ppu --
+
+module PpuTest (ppuTests) where
+
 import qualified Test.Framework.Providers.API as TFA
 import Test.Framework.Providers.HUnit
-import Test.Framework.Runners.Console (defaultMain)
 import Test.HUnit
 
 import Data.Word
@@ -19,7 +21,7 @@ testNameTableMirrorLower =
   where
     tests = map (\(addr, val, label) -> testCase (show label) $
         let res = evalState (setMirror addr val) ppu in
-        assertEqual ("addr " ++ show addr) val res) (zip3 addrs vals [1..])
+        assertEqual ("addr " ++ show addr) val res) (zip3 addrs vals ([1..] :: [Int]))
 
     vals = [0x1F, 0x3F, 0x94, 0x07]
     addrs = [0x2000, 0x2EFF, 0x2342, 0x2983]
@@ -36,7 +38,7 @@ testNameTableMirrorHigher =
   where
     tests = map (\(addr, val, label) -> testCase (show label) $
         let res = evalState (setMirror addr val) ppu in
-        assertEqual ("addr " ++ show addr) val res) (zip3 addrs vals [1..])
+        assertEqual ("addr " ++ show addr) val res) (zip3 addrs vals ([1..] :: [Int]))
 
     vals = [0x63, 0x78, 0x92, 0x26]
     addrs = [0x3000, 0x3EFF, 0x3A8F, 0x342E]
@@ -54,7 +56,7 @@ testPatternMirror =
     tests = map (\(addr, val, label) -> testCase (show label) $
                 let res = evalState (setMirror addr val) ppu in
                 sequence_ (map (\r -> assertEqual ("addr " ++ show addr) val r) res)) 
-            (zip3 addrs vals [1..])
+            (zip3 addrs vals ([1..] :: [Int]))
 
     vals = [0x8A, 0xFF, 0x78, 0xB1, 0x45, 0x72, 0x92, 0xD3]
     addrs = [0x3F00, 0x3F3F, 0x3F49, 0x3F72, 0x3F8B, 0x3FBB, 0x3FC1, 0x3FFF]
@@ -78,4 +80,3 @@ testPatternMirror =
 ppuTests = TFA.testGroup "PPU Tests" 
     [testNameTableMirrorLower, testNameTableMirrorHigher, testPatternMirror]
 
-runPpuTests = defaultMain [ppuTests]

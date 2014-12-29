@@ -6,10 +6,8 @@ module Ppu (
 
 import Data.Word
 import Data.Bits
-import Data.Int
 import Control.Monad.State.Strict
 import qualified Data.Vector.Unboxed as VU
-import Control.Applicative hiding ((<|>), many, optional, empty)
 
 data PPU = PPU {
    -- registers :: Registers,
@@ -63,7 +61,7 @@ setMem val addr = do
                 [(fromIntegral addr + 0x1000, val)]
         else if addr >= 0x3F00 then -- Mirror every 32 bytes (0x20 bytes)
                 let offset = addr .&. 0x1F in
-                map (\addr -> (fromIntegral $ addr + offset, val)) 
+                map (\addr' -> (fromIntegral $ addr' + offset, val)) 
                     (map (\n -> 0x3F00 + (0x20 * n)) [0,1..7])
         else [] -- Not a mirrored address
 
