@@ -35,7 +35,7 @@ test-suite nes-unit-tests
 
 executable NesMonad
   main-is:             Main.hs
-  -- other-modules:       
+  other-modules: Ppu, Cpu, Instructions, Debugger      
   -- other-extensions:    
   build-depends:       base >=4.6 && <4.8
   hs-source-dirs:      src
