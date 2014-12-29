@@ -1,6 +1,8 @@
 -- Picture Processing Unit --
 
-module Ppu (createPPU, loadPPU) where
+module Ppu (
+    createPPU, loadPPU,
+    getMem, setMem, PPUState) where
 
 import Data.Word
 import Data.Bits
@@ -55,10 +57,12 @@ setMem val addr = do
     --                         0x3F00 -> 0x3F1F multiple mirrors from 0x3F20 -> 0x3FFF
     mirrorAddrs :: [(Int, Word8)]
     mirrorAddrs = 
-        if addr .&. 0x3E00 == 0x3E00 then [(fromIntegral addr - 0x1000, val)]
-        else if addr .&. 0x2E00 == 0x2E00 then [(fromIntegral addr + 0x1000, val)]
+        if addr .&. 0xF000 == 0x3000 && addr < 0x3F00 then 
+                [(fromIntegral addr - 0x1000, val)]
+        else if addr .&. 0xF000 == 0x2000 && addr < 0x2F00  then 
+                [(fromIntegral addr + 0x1000, val)]
         else if addr >= 0x3F00 then -- Mirror every 32 bytes (0x20 bytes)
-                let offset = addr .&. 0x20 in
+                let offset = addr .&. 0x1F in
                 map (\addr -> (fromIntegral $ addr + offset, val)) 
                     (map (\n -> 0x3F00 + (0x20 * n)) [0,1..7])
         else [] -- Not a mirrored address
