@@ -11,7 +11,7 @@ import Control.Applicative hiding ((<|>), many, optional, empty)
 
 data PPU = PPU {
    -- registers :: Registers,
-    memory :: Memory, -- ^ PPU contains it's own 64KB RAM
+    memory :: Memory, -- ^ PPU contains it's own 16KB RAM
     cycles :: Integer,
     scanLine :: Integer
 }
@@ -22,7 +22,7 @@ type PPUState a = State PPU a
 
 createPPU :: PPU
 createPPU = PPU mem 0 0
-  where mem = Memory $ VU.replicate 0x10000 0x0
+  where mem = Memory $ VU.replicate 0x4000 0x0
 
 -- Load initial 8KB char map into PPU at addresss 0x0000 - 0x1FFF
 loadPPU :: [Word8] -> PPU -> PPU
@@ -46,8 +46,24 @@ getMem loc = do
 
 
 setMem :: Word8 -> Word16 -> PPUState ()
-setMem val loc = do 
-    (Memory mem) <- getAllMem 
+setMem val addr = do 
+    (Memory mem) <- getAllMem
     setAllMem $ Memory $ VU.update mem updatedIndex
- where updatedIndex = VU.fromList [(fromIntegral loc, val)]
+ where 
+    updatedIndex = VU.fromList $ [(fromIntegral addr, val)] ++ mirrorAddrs
+    -- Take care of mirroring, 0x2000 -> 0x2EFF = 0x3000 -> 0x3EFF
+    --                         0x3F00 -> 0x3F1F multiple mirrors from 0x3F20 -> 0x3FFF
+    mirrorAddrs :: [(Int, Word8)]
+    mirrorAddrs = 
+        if addr .&. 0x3E00 == 0x3E00 then [(fromIntegral addr - 0x1000, val)]
+        else if addr .&. 0x2E00 == 0x2E00 then [(fromIntegral addr + 0x1000, val)]
+        else if addr >= 0x3F00 then -- Mirror every 32 bytes (0x20 bytes)
+                let offset = addr .&. 0x20 in
+                map (\addr -> (fromIntegral $ addr + offset, val)) 
+                    (map (\n -> 0x3F00 + (0x20 * n)) [0,1..7])
+        else [] -- Not a mirrored address
+
+
+
+
 
