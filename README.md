@@ -1,4 +1,4 @@
-NesMonad
+NesMonad [![Build Status](https://travis-ci.org/RossMeikleham/NesMonad.svg?branch=master)](https://travis-ci.org/RossMeikleham/NesMonad)
 ============
 
 Nintendo Entertainment System emulator in Haskell
