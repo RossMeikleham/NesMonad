@@ -64,7 +64,15 @@ data StatusFlags =
     | Overflow
     | Negative
 
-data Memory = Memory (VU.Vector Word8)
+data Memory = Memory {
+    workRAM :: VU.Vector Word8 -- ^ 0x0000 - 0x07FF Work RAM
+    ppuCtrlRAM :: VU.Vector Word8 -- ^ 0x2000 - 0x2007 PPU Control Registers
+    apuRegisters :: VU.Vector Word8 -- ^ 0x4000 - 0x401F  APU Registers
+    expansionROM :: VU.Vector Word8 -- ^ 0x4200 - 0x5FFF Cartridge Expansion ROM
+    staticRAM :: VU.Vector Word8 -- ^ 0x6000 - 0x7FFF SRAM
+    prgROM0 :: VU.Vector Word8 -- ^ 0x8000 - 0xBFFF Program ROM bank 0
+    prgROM1 :: VU.Vector Word8 -- ^ 0xC000 - 0xFFFF Program ROM bank 1
+}
 
 type CPUState a = State CPU a
 
@@ -78,16 +86,21 @@ createCPU :: Word16 -> CPU
 createCPU startAddr = cpu 
   where cycles = 0
         regs = Registers 0 0 0 0x24 0xFD startAddr
-        mem = Memory $ VU.replicate 0x10000 0x0
         cpu = CPU regs mem cycles 241
+        mem = Memory $ 
+            VU.replicate 0x0800 0x0
+            VU.replicate 0x0008 0x0
+            VU.replicate 0x0020 0x0
+            VU.replicate 0x1FDF 0x0
+            VU.replicate 0x2000 0x0
+            VU.replicate 0x4000 0x0
+            VU.replicate 0x4000 0x0
 
--- Load ROM into memory starting at given address
-loadMemory :: [Word8] -> Word16 -> CPU -> CPU
-loadMemory rom startAddr cpu = execState loadMemory' cpu
-  where loadMemory' :: CPUState ()
-        loadMemory' = do
-            mapM_ (\(val, offset) -> setMem val (startAddr + offset)) 
-                        (zip rom [0,1..0xFFFF - startAddr])
+-- Load ROM into memory
+loadROM :: [Word8] -> CPU -> CPU
+loadROM rom cpu = cpu {memory = {prgROM0 = romReg, prgROM1 = romRec}} 
+  where romVec = VU.fromList rom
+     
       
 getReg :: Reg -> CPUState Word8
 getReg A = getA
@@ -293,6 +306,7 @@ setMem val loc = do
     (Memory mem) <- getAllMem 
     setAllMem $ Memory $ VU.update mem updatedIndex
  where updatedIndex = VU.fromList [(fromIntegral loc, val)]
+
 
 getCarry :: CPUState Bool
 getCarry = getS >>= \s -> return $ (s .&. 0x1) /= 0

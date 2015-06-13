@@ -21,11 +21,10 @@ test-suite nes-unit-tests
   main-is:            TestMain.hs
   hs-source-dirs:     src tests
   build-depends:
-                 base >=4.6 && < 4.8, 
+                 base >=4.6 && < 5.0,
                  HUnit, 
                  test-framework >= 0.6,
                  test-framework-hunit,
-                 Cabal,
                  mtl,            
                  vector 
 
@@ -37,7 +36,7 @@ executable NesMonad
   main-is:             Main.hs
   other-modules: Ppu, Cpu, Instructions, Debugger      
   -- other-extensions:    
-  build-depends:       base >=4.6 && <4.8
+  build-depends:       base >=4.6 && <5.0
   hs-source-dirs:      src
   default-language:    Haskell2010
 
