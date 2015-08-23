@@ -1,7 +1,7 @@
 -- Atari 2600 6507 CPU --
 module Cpu (
     CPU(..),
-    createCPU, loadMemory,
+    createCPU,
     Registers(..),
     Memory,
     CPUState,
@@ -34,9 +34,7 @@ import Data.Bits
 import Data.Int
 import Control.Monad.State.Strict
 import qualified Data.Vector.Unboxed as VU
-import Control.Applicative hiding ((<|>), many, optional, empty)
-import System.IO.Unsafe
-import Text.Printf
+
 
 data CPU = CPU {
     registers :: Registers,
@@ -65,12 +63,12 @@ data StatusFlags =
     | Negative
 
 data Memory = Memory {
-    workRAM :: VU.Vector Word8 -- ^ 0x0000 - 0x07FF Work RAM
-    ppuCtrlRAM :: VU.Vector Word8 -- ^ 0x2000 - 0x2007 PPU Control Registers
-    apuRegisters :: VU.Vector Word8 -- ^ 0x4000 - 0x401F  APU Registers
-    expansionROM :: VU.Vector Word8 -- ^ 0x4200 - 0x5FFF Cartridge Expansion ROM
-    staticRAM :: VU.Vector Word8 -- ^ 0x6000 - 0x7FFF SRAM
-    prgROM0 :: VU.Vector Word8 -- ^ 0x8000 - 0xBFFF Program ROM bank 0
+    workRAM :: VU.Vector Word8, -- ^ 0x0000 - 0x07FF Work RAM
+    ppuCtrlRAM :: VU.Vector Word8, -- ^ 0x2000 - 0x2007 PPU Control Registers
+    apuRegisters :: VU.Vector Word8, -- ^ 0x4000 - 0x401F  APU Registers
+    expansionROM :: VU.Vector Word8, -- ^ 0x4200 - 0x5FFF Cartridge Expansion ROM
+    staticRAM :: VU.Vector Word8, -- ^ 0x6000 - 0x7FFF SRAM
+    prgROM0 :: VU.Vector Word8, -- ^ 0x8000 - 0xBFFF Program ROM bank 0
     prgROM1 :: VU.Vector Word8 -- ^ 0xC000 - 0xFFFF Program ROM bank 1
 }
 
@@ -80,26 +78,26 @@ data AddressingMode =
     Immediate | ZeroPageNoReg | ZeroPage Reg | AbsoluteNoReg |
     Absolute Reg | IndirectX | IndirectY 
 
-data Reg = A | B | X | Y | S | SP deriving (Eq)
+data Reg = A | X | Y | S | SP deriving (Eq)
 
 createCPU :: Word16 -> CPU
-createCPU startAddr = cpu 
-  where cycles = 0
+createCPU startAddr = cpu'
+  where cycles' = 0
         regs = Registers 0 0 0 0x24 0xFD startAddr
-        cpu = CPU regs mem cycles 241
-        mem = Memory $ 
-            VU.replicate 0x0800 0x0
-            VU.replicate 0x0008 0x0
-            VU.replicate 0x0020 0x0
-            VU.replicate 0x1FDF 0x0
-            VU.replicate 0x2000 0x0
-            VU.replicate 0x4000 0x0
-            VU.replicate 0x4000 0x0
+        cpu' = CPU regs mem cycles' 241
+        mem = Memory 
+            (VU.replicate 0x0800 0x0)
+            (VU.replicate 0x0008 0x0)
+            (VU.replicate 0x0020 0x0)
+            (VU.replicate 0x1FDF 0x0)
+            (VU.replicate 0x2000 0x0)
+            (VU.replicate 0x4000 0x0)
+            (VU.replicate 0x4000 0x0)
 
 -- Load ROM into memory
-loadROM :: [Word8] -> CPU -> CPU
-loadROM rom cpu = cpu {memory = {prgROM0 = romReg, prgROM1 = romRec}} 
-  where romVec = VU.fromList rom
+--loadROM :: [Word8] -> CPU -> CPU
+--loadROM rom cpu = cpu {memory = {prgROM0 = romReg, prgROM1 = romRec}} 
+--  where romVec = VU.fromList rom
      
       
 getReg :: Reg -> CPUState Word8
@@ -142,9 +140,9 @@ obtainModeVal mode checkBoundary = case mode of
     Absolute reg -> do
         r <- getReg reg
         imm <- getImm 
-        let sum = imm + (fromIntegral r) 
-        when checkBoundary $ checkPageBoundary imm sum
-        getMem sum
+        let sum' = imm + (fromIntegral r) 
+        when checkBoundary $ checkPageBoundary imm sum'
+        getMem sum'
 
     IndirectX -> do
         im <- getIm
@@ -213,8 +211,8 @@ setCycles c = get >>= \cpu -> put $ cpu {cycles = c}
 
 modifyCycles :: (Integer -> Integer) -> CPUState () 
 modifyCycles f = do
-    cycles <- getCycles 
-    setCycles (f cycles)
+    cycles' <- getCycles 
+    setCycles (f cycles')
 
 -- Get/Set current ScanLine
 getScanLine :: CPUState Integer
@@ -269,24 +267,24 @@ getPC = getRegs >>= return . pc
 
 getIm :: CPUState Word8
 getIm = do
-    pc <- getPC
-    getMem (pc - 1)
+    pc' <- getPC
+    getMem (pc' - 1)
     
 setIm :: Word8 -> CPUState ()
 setIm w8 = do
-    pc <- getPC
-    setMem w8 (pc - 1) 
+    pc' <- getPC
+    setMem w8 (pc' - 1) 
     
 getImm :: CPUState Word16
 getImm = do
-    pc <- getPC
-    concatBytesLe <$> getMem (pc - 2) <*> getMem (pc - 1)
+    pc' <- getPC
+    concatBytesLe <$> getMem (pc' - 2) <*> getMem (pc' - 1)
 
 setImm :: Word16 -> CPUState ()
 setImm w16 = do
-    pc <- getPC
-    setMem (fromIntegral (w16 .&. 0x7F)) (pc - 2)
-    setMem (fromIntegral (w16 `shiftR` 8)) (pc - 1)
+    pc' <- getPC
+    setMem (fromIntegral (w16 .&. 0x7F)) (pc' - 2)
+    setMem (fromIntegral (w16 `shiftR` 8)) (pc' - 1)
 
 getAllMem :: CPUState Memory
 getAllMem = get >>= return . memory
@@ -296,16 +294,44 @@ setAllMem mem = get >>= \cpu -> put $ cpu {memory = mem}
 
 -- Get/Set word from Memory
 getMem :: Word16 -> CPUState Word8
-getMem loc = do 
-    (Memory mem) <- getAllMem
-    return $ mem VU.! (fromIntegral loc)
+getMem addr = do 
+    (Memory wRAM pCtrlRAM aRegisters expansionRegs static prgR0 prgR1) <- getAllMem
+    if addr < 0x2000 then
+        return $ wRAM VU.! fromIntegral (addr .&. 0x7FF)
+    else if addr < 0x4000 then
+        return $ pCtrlRAM VU.! fromIntegral (addr .&. 0x7)
+    else if addr < 0x4020 then 
+        return $ aRegisters VU.! fromIntegral (addr - 0x4000) 
+    else if addr < 0x6000 then
+        return $ expansionRegs VU.! fromIntegral (addr - 0x4020)
+    else if addr < 0x8000 then
+        return $ static VU.! fromIntegral (addr - 0x6000)
+    else if addr < 0xC000 then
+        return $ prgR0 VU.! fromIntegral (addr - 0x8000)
+    else 
+        return $ prgR1 VU.! fromIntegral (addr - 0xC000)
 
 
 setMem :: Word8 -> Word16 -> CPUState ()
-setMem val loc = do 
-    (Memory mem) <- getAllMem 
-    setAllMem $ Memory $ VU.update mem updatedIndex
- where updatedIndex = VU.fromList [(fromIntegral loc, val)]
+setMem val addr = do 
+    mem@(Memory wRAM pCtrlRAM aRegisters expansionRegs static prgR0 prgR1) <- getAllMem
+    if addr < 0x2000 then
+        setAllMem $ mem {workRAM = setMem' wRAM (.&. 0x7FF)}
+    else if addr < 0x4000 then
+        setAllMem $ mem {ppuCtrlRAM = setMem' pCtrlRAM (.&. 0x7)}
+    else if addr < 0x4020 then 
+        setAllMem $ mem {apuRegisters = setMem' aRegisters (\a -> a - 0x4000)}
+    else if addr < 0x6000 then
+        setAllMem $ mem {expansionROM = setMem' expansionRegs (\a -> a - 0x4020)}
+    else if addr < 0x8000 then
+        setAllMem $ mem {staticRAM = setMem' static (\a -> a - 0x6000)}
+    else if addr < 0xC000 then
+        setAllMem $ mem {prgROM0 = setMem' prgR0 (\a -> a - 0x8000)}
+    else 
+        setAllMem $ mem {prgROM1 = setMem' prgR1 (\a -> a - 0xC000)}
+    
+    where setMem' :: VU.Vector Word8 -> (Word16 -> Word16) -> VU.Vector Word8
+          setMem' v f = VU.update v (VU.fromList [(fromIntegral (f addr), val)])
 
 
 getCarry :: CPUState Bool
@@ -322,10 +348,10 @@ getOverflow = getS >>= \s -> return $ (s .&. 0x40) /= 0
 
 
 setFlag :: Word8 -> Bool -> CPUState ()
-setFlag bits state = do
+setFlag bits state' = do
     s <- getS
     setS $ op s
-  where op = if state then (.|. bits) else (.&. (0xFF - bits)) 
+  where op = if state' then (.|. bits) else (.&. (0xFF - bits)) 
 
 setCarry :: Bool -> CPUState ()
 setCarry = setFlag 0x1 
@@ -357,7 +383,7 @@ boolToBit b = if b then 1 else 0
 -- Concatonate 2 bytes into 16 byte little endian word
 -- first byte given is lower half of the word, second is upper half
 concatBytesLe :: Word8 -> Word8 -> Word16
-concatBytesLe b1 b2 = (fromIntegral b1) .|. (shiftL (fromIntegral b2) 8) 
+concatBytesLe b1 b2 = fromIntegral b1 .|. shiftL (fromIntegral b2) 8
 
 add3 :: Word8 -> Word8 -> Word8 -> Word8
 add3 a b c = a + b + c
@@ -366,5 +392,5 @@ isNeg :: Word8 -> Bool
 isNeg = (>) 127
 
 toSigned :: Word8 -> Int8
-toSigned w8 = (fromIntegral (w8 .&. 127)) - (fromIntegral (w8 .&. 128))
+toSigned w8 = fromIntegral $ (w8 .&. 127) - fromIntegral (w8 .&. 128)
 
