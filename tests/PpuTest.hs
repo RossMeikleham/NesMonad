@@ -31,7 +31,7 @@ testNameTableMirrorLower =
         setMem val addr 
         getMem (addr + 0x1000)    
 
--- Check 0x3000 -> 0x3FFF is mirrored correctly
+-- Check 0x3000 -> 0xEFFF is mirrored correctly
 testNameTableMirrorHigher :: TFA.Test
 testNameTableMirrorHigher = 
     TFA.testGroup "PPU RAM mirror 0x3000 - 0x3EFF" tests

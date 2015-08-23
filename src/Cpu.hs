@@ -1,32 +1,5 @@
 -- Atari 2600 6507 CPU --
-module Cpu (
-    CPU(..),
-    createCPU,
-    Registers(..),
-    Memory,
-    CPUState,
-    AddressingMode(..),
-    Reg(..),
-    getReg, setReg,
-    obtainModeVal,
-    setModeVal,
-    push,
-    pop,
-    setRegs, getRegs,
-    setCycles, getCycles, modifyCycles,
-    setScanLine, getScanLine, modifyScanLine,
-    setA, setX, setY, setS, setSP, setPC,
-    getA, getX, getY, getS, getSP, getPC,
-    getIm, setIm,
-    getImm, setImm,
-    getAllMem, setAllMem,
-    getMem, setMem,
-    getCarry, getNeg, getZero, getOverflow,
-    setFlag,
-    setCarry, setNeg, setZero, setOverflow, setIRQ,
-    checkNegFlag, checkZeroFlag,
-    concatBytesLe, add3, boolToBit, isNeg
-    ) where
+module Cpu where
 
 
 import Data.Word
@@ -94,10 +67,14 @@ createCPU startAddr = cpu'
             (VU.replicate 0x4000 0x0)
             (VU.replicate 0x4000 0x0)
 
--- Load ROM into memory
---loadROM :: [Word8] -> CPU -> CPU
---loadROM rom cpu = cpu {memory = {prgROM0 = romReg, prgROM1 = romRec}} 
---  where romVec = VU.fromList rom
+-- Load ROM into memory starting at given address
+loadMemory :: [Word8] -> Word16 -> CPU -> CPU
+loadMemory rom startAddr = execState loadMemory'
+  where loadMemory' :: CPUState ()
+        loadMemory' = 
+            mapM_ (\(val, offset) -> setMem val (startAddr + offset)) 
+                        (zip rom [0,1..0xFFFF - startAddr])
+
      
       
 getReg :: Reg -> CPUState Word8
