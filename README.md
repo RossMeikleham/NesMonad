@@ -15,6 +15,6 @@ TODO
 - Correct loading of ROMS and startup initialization
 - Implementation of PPU 
 - Implementation of APU
-- Implementation of Memory mirroring and redirection to IO ports
+- Implementation of Memory redirection to IO ports
 - ROM mapper
 - Keyboard input and graphics output
