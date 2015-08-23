@@ -6,6 +6,7 @@ import Data.Word
 import Data.Bits
 import Data.Int
 import Control.Monad.State.Strict
+import Control.Applicative hiding ((<|>), many, optional, empty)
 import qualified Data.Vector.Unboxed as VU
 
 
